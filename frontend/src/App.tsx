@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import './index.css'
+import { API } from './config'
+import { authFetch } from './lib/api'
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
@@ -30,7 +32,7 @@ function App() {
 
     try {
       // Assuming backend is running on 8000
-      const response = await fetch('http://localhost:8000/api/imports/upload', {
+      const response = await authFetch(`${API}/api/imports/upload`, {
         method: 'POST',
         body: formData,
       });

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Save } from 'lucide-react';
-
-const API = 'http://localhost:8000';
+import { API } from '../config';
+import { authFetch } from '../lib/api';
 const money = (value: string | number | null | undefined) => `NPR ${new Intl.NumberFormat('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0))}`;
 type Allocation = { category: string; planned_amount: string; allocation_type: string };
 
@@ -23,17 +23,17 @@ export const Budget: React.FC = () => {
   const [message, setMessage] = useState('');
 
   const load = async () => {
-    const res = await fetch(`${API}/api/budgets/${year}/${month}`);
+    const res = await authFetch(`${API}/api/budgets/${year}/${month}`);
     if (res.ok) { const data = await res.json(); setBudget(data); setIncome(data.expected_income); setSaving(data.planned_saving || ''); setAllocations(data.allocations); }
     else setBudget(null);
-    const comparisonRes = await fetch(`${API}/api/analytics/budget?year=${year}&month=${month}`);
+    const comparisonRes = await authFetch(`${API}/api/analytics/budget?year=${year}&month=${month}`);
     setComparison(comparisonRes.ok ? await comparisonRes.json() : null);
   };
   useEffect(() => { load(); }, [year, month]);
 
   const save = async () => {
     const payload = { year, month, expected_income: income, planned_saving: saving || null, allocations };
-    const res = await fetch(budget ? `${API}/api/budgets/${budget.id}` : `${API}/api/budgets`, { method: budget ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const res = await authFetch(budget ? `${API}/api/budgets/${budget.id}` : `${API}/api/budgets`, { method: budget ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (res.ok) { setMessage('Plan saved'); await load(); } else setMessage('Could not save plan');
   };
   const updateAllocation = (index: number, field: keyof Allocation, value: string) => setAllocations(items => items.map((item, i) => i === index ? { ...item, [field]: value } : item));

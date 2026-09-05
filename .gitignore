@@ -1,6 +1,8 @@
 # Environment
 .env
 *.env.local
+.env.local
+.env.production.local
 
 # Python
 __pycache__/
@@ -43,3 +45,7 @@ Thumbs.db
 
 # Alembic
 *.db
+
+# Data migration exports (contain personal financial data)
+backend/scripts/data_export/
+

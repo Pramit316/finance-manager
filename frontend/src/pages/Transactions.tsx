@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Search, Filter, ChevronLeft, ChevronRight, Edit2, Check, X, Plus } from 'lucide-react';
-
-const API = 'http://localhost:8000';
+import { API } from '../config';
+import { authFetch } from '../lib/api';
 
 const KIND_COLORS: Record<string, string> = {
   EXPENSE: '#ef4444',
@@ -97,8 +97,8 @@ export const Transactions: React.FC = () => {
   const fetchData = useCallback(async () => {
     try {
       const [accRes, catRes] = await Promise.all([
-        fetch(`${API}/api/accounts/`),
-        fetch(`${API}/api/analytics/distinct-categories`)
+        authFetch(`${API}/api/accounts/`),
+        authFetch(`${API}/api/analytics/distinct-categories`)
       ]);
       if (accRes.ok) setAccounts(await accRes.json());
       if (catRes.ok) setDbCategories((await catRes.json()).categories || []);
@@ -123,7 +123,7 @@ export const Transactions: React.FC = () => {
     if (search) params.set('search', search);
 
     try {
-      const res = await fetch(`${API}/api/transactions/?${params}`);
+      const res = await authFetch(`${API}/api/transactions/?${params}`);
       if (res.ok) {
         const data = await res.json();
         setTransactions(data.transactions);
@@ -158,7 +158,7 @@ export const Transactions: React.FC = () => {
       if (editing.category) body.category = editing.category;
       if (editing.merchant) body.merchant = editing.merchant;
 
-      const res = await fetch(`${API}/api/transactions/${editing.id}`, {
+      const res = await authFetch(`${API}/api/transactions/${editing.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -174,14 +174,14 @@ export const Transactions: React.FC = () => {
 
   const deleteManual = async (transaction: Transaction) => {
     if (transaction.source !== 'MANUAL' || !window.confirm('Delete this manual transaction?')) return;
-    const res = await fetch(`${API}/api/transactions/manual/${transaction.id}`, { method: 'DELETE' });
+    const res = await authFetch(`${API}/api/transactions/manual/${transaction.id}`, { method: 'DELETE' });
     if (res.ok) fetchTransactions();
   };
 
   const createManual = async (event: React.FormEvent) => {
     event.preventDefault();
     setManualError('');
-    const res = await fetch(`${API}/api/transactions/manual`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...manual, amount: manual.amount }) });
+    const res = await authFetch(`${API}/api/transactions/manual`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...manual, amount: manual.amount }) });
     if (!res.ok) { setManualError((await res.json().catch(() => null))?.detail || 'Could not create transaction'); return; }
     setShowManualForm(false);
     setManual({ ...manual, description: '', amount: '', category: '', subcategory: '', merchant: '', notes: '' });

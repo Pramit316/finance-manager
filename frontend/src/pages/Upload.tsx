@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { API } from '../config';
+import { authFetch } from '../lib/api';
 
 export const Upload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -28,7 +30,7 @@ export const Upload: React.FC = () => {
     formData.append('account_id', accountId);
 
     try {
-      const response = await fetch('http://localhost:8000/api/imports/upload', {
+      const response = await authFetch(`${API}/api/imports/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -42,8 +44,8 @@ export const Upload: React.FC = () => {
       setResult(data);
       
       // Auto-run classification and transfer matching after upload
-      await fetch('http://localhost:8000/api/transactions/run-classification', { method: 'POST' });
-      await fetch('http://localhost:8000/api/transactions/match-transfers', { method: 'POST' });
+      await authFetch(`${API}/api/transactions/run-classification`, { method: 'POST' });
+      await authFetch(`${API}/api/transactions/match-transfers`, { method: 'POST' });
       
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred');

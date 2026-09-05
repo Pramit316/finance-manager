@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FileText, CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react';
-
-const API = 'http://localhost:8000';
+import { API } from '../config';
+import { authFetch } from '../lib/api';
 
 const STATUS_CONFIG: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
   IMPORTED: { icon: <CheckCircle size={16} />, color: '#10b981', label: 'Imported' },
@@ -52,7 +52,7 @@ export const Imports: React.FC = () => {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${API}/api/imports/`)
+    authFetch(`${API}/api/imports/`)
       .then(r => r.json())
       .then(data => setImports(data))
       .catch(console.error)

@@ -1,15 +1,18 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, List, Upload, FileText, WalletCards } from 'lucide-react';
+import { LayoutDashboard, List, Upload, FileText, WalletCards, LogOut } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export const Layout: React.FC = () => {
+  const { signOut, user } = useAuth();
+
   return (
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="logo-icon">₨</div>
           <div>
-            <h2 className="sidebar-title">Finance AI</h2>
+            <h2 className="sidebar-title">FinTrack</h2>
             <p className="sidebar-subtitle">Personal Tracker</p>
           </div>
         </div>
@@ -38,7 +41,13 @@ export const Layout: React.FC = () => {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="sidebar-version">v0.2.0 · Phase 2</div>
+          {user && (
+            <button className="sign-out-btn" onClick={signOut} title={user.email ?? ''}>
+              <LogOut size={16} />
+              Sign Out
+            </button>
+          )}
+          <div className="sidebar-version">v0.3.0 · Production</div>
         </div>
       </aside>
 
@@ -50,3 +59,4 @@ export const Layout: React.FC = () => {
     </div>
   );
 };
+

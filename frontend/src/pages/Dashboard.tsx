@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, ArrowLeftRight, AlertCircle, Filter } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import { Link } from 'react-router-dom';
-
-const API = 'http://localhost:8000';
+import { API } from '../config';
+import { authFetch } from '../lib/api';
 
 const COLORS = ['#4f8ef7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#6b7280'];
 
@@ -94,15 +94,15 @@ export const Dashboard: React.FC = () => {
         summaryRes, spendCatRes, incCatRes, spendAccRes, 
         trendRes, unkRes, accsRes, recentRes, catsRes
       ] = await Promise.all([
-        fetch(`${API}/api/analytics/summary${q}`),
-        fetch(`${API}/api/analytics/categories${q}`),
-        fetch(`${API}/api/analytics/income-categories${q}`),
-        fetch(`${API}/api/analytics/spending-by-account${q}`),
-        fetch(`${API}/api/analytics/monthly-trend${q}`),
-        fetch(`${API}/api/analytics/unknown-count${q}`),
-        fetch(`${API}/api/analytics/accounts`),
-        fetch(`${API}/api/transactions/${q}${qs ? '&' : '?'}page=1&page_size=10`),
-        fetch(`${API}/api/analytics/distinct-categories`)
+        authFetch(`${API}/api/analytics/summary${q}`),
+        authFetch(`${API}/api/analytics/categories${q}`),
+        authFetch(`${API}/api/analytics/income-categories${q}`),
+        authFetch(`${API}/api/analytics/spending-by-account${q}`),
+        authFetch(`${API}/api/analytics/monthly-trend${q}`),
+        authFetch(`${API}/api/analytics/unknown-count${q}`),
+        authFetch(`${API}/api/analytics/accounts`),
+        authFetch(`${API}/api/transactions/${q}${qs ? '&' : '?'}page=1&page_size=10`),
+        authFetch(`${API}/api/analytics/distinct-categories`)
       ]);
 
       if (!summaryRes.ok) throw new Error(`Summary: ${summaryRes.status}`);
@@ -117,7 +117,7 @@ export const Dashboard: React.FC = () => {
       setRecent((await recentRes.json()).transactions || []);
       setDbCategories((await catsRes.json()).categories || []);
       const now = new Date();
-      const budgetRes = await fetch(`${API}/api/analytics/budget?year=${now.getFullYear()}&month=${now.getMonth() + 1}`);
+      const budgetRes = await authFetch(`${API}/api/analytics/budget?year=${now.getFullYear()}&month=${now.getMonth() + 1}`);
       setBudget(budgetRes.ok ? await budgetRes.json() : null);
       
     } catch (err: any) {
