@@ -52,37 +52,19 @@ export const Dashboard: React.FC = () => {
   const [source, setSource] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [activePreset, setActivePreset] = useState('all');
   const [kindFilter, setKindFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState('');
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     
-    let from = dateFrom;
-    let to = dateTo;
-    
-    if (selectedYear && selectedMonth) {
-        const year = parseInt(selectedYear);
-        const month = parseInt(selectedMonth);
-        from = `${selectedYear}-${selectedMonth}-01`;
-        
-        // Calculate the last day of the month
-        const lastDay = new Date(year, month, 0).getDate();
-        to = `${selectedYear}-${selectedMonth}-${lastDay}`; 
-    } else if (selectedYear) {
-        from = `${selectedYear}-01-01`;
-        to = `${selectedYear}-12-31`;
-    }
-
     const params = new URLSearchParams();
     if (accountId) params.append('account_id', accountId);
     if (source) params.append('source', source);
-    if (from) params.append('date_from', from);
-    if (to) params.append('date_to', to);
+    if (dateFrom) params.append('date_from', dateFrom);
+    if (dateTo) params.append('date_to', dateTo);
     if (kindFilter) params.append('transaction_kind', kindFilter);
     if (categoryFilter) params.append('category', categoryFilter);
 
@@ -125,7 +107,7 @@ export const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [accountId, source, dateFrom, dateTo, kindFilter, categoryFilter, selectedYear, selectedMonth]);
+  }, [accountId, source, dateFrom, dateTo, kindFilter, categoryFilter]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -133,28 +115,50 @@ export const Dashboard: React.FC = () => {
     ? parseFloat(accounts.find(account => account.account_id === accountId)?.latest_balance ?? 0)
     : accounts.reduce((acc, curr) => acc + parseFloat(curr.latest_balance ?? 0), 0);
   
+  const toDateInput = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const setDatePreset = (preset: string) => {
     const today = new Date();
-    setSelectedYear('');
-    setSelectedMonth('');
+    const todayValue = toDateInput(today);
+    setActivePreset(preset);
     
     if (preset === 'all') {
         setDateFrom('');
         setDateTo('');
     } else if (preset === 'today') {
-        const d = today.toISOString().split('T')[0];
-        setDateFrom(d);
-        setDateTo(d);
+        setDateFrom(todayValue);
+        setDateTo(todayValue);
+    } else if (preset === '7days' || preset === '30days') {
+        const days = preset === '7days' ? 6 : 29;
+        const first = new Date(today);
+        first.setDate(today.getDate() - days);
+        setDateFrom(toDateInput(first));
+        setDateTo(todayValue);
     } else if (preset === 'month') {
         const first = new Date(today.getFullYear(), today.getMonth(), 1);
-        setDateFrom(first.toISOString().split('T')[0]);
-        setDateTo(today.toISOString().split('T')[0]);
+        setDateFrom(toDateInput(first));
+        setDateTo(todayValue);
+    } else if (preset === 'lastmonth') {
+        const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const last = new Date(today.getFullYear(), today.getMonth(), 0);
+        setDateFrom(toDateInput(first));
+        setDateTo(toDateInput(last));
     } else if (preset === 'year') {
         const first = new Date(today.getFullYear(), 0, 1);
-        setDateFrom(first.toISOString().split('T')[0]);
-        setDateTo(today.toISOString().split('T')[0]);
+        setDateFrom(toDateInput(first));
+        setDateTo(todayValue);
     }
   };
+
+  const datePresets = [
+    ['all', 'All Time'], ['today', 'Today'], ['7days', 'Last 7 Days'], ['30days', 'Last 30 Days'],
+    ['month', 'This Month'], ['lastmonth', 'Last Month'], ['year', 'This Year'], ['custom', 'Custom Range'],
+  ];
 
   if (error) {
     return (
@@ -189,23 +193,19 @@ export const Dashboard: React.FC = () => {
         <div className="filter-group">
           <Filter size={14} style={{ color: 'var(--text-secondary)' }} />
           
-          <button className="btn-ghost" onClick={() => setDatePreset('all')}>All Time</button>
-          <button className="btn-ghost" onClick={() => setDatePreset('month')}>This Month</button>
-          <button className="btn-ghost" onClick={() => setDatePreset('year')}>This Year</button>
-          
-          <select value={selectedYear} onChange={e => {setSelectedYear(e.target.value); setDateFrom(''); setDateTo('');}} className="filter-select">
-            <option value="">Year</option>
-            <option value="2026">2026</option>
-            <option value="2025">2025</option>
-          </select>
-          
-          <select value={selectedMonth} onChange={e => {setSelectedMonth(e.target.value); setDateFrom(''); setDateTo('');}} className="filter-select" disabled={!selectedYear}>
-            <option value="">Month</option>
-            {Array.from({length: 12}, (_, i) => {
-                const m = String(i+1).padStart(2, '0');
-                return <option key={m} value={m}>{new Date(2000, i).toLocaleString('default', {month: 'short'})}</option>
-            })}
-          </select>
+          {datePresets.map(([value, label]) => (
+            <button key={value} className={`btn-ghost filter-preset ${activePreset === value ? 'active' : ''}`} onClick={() => setDatePreset(value)}>
+              {label}
+            </button>
+          ))}
+
+          {activePreset === 'custom' && (
+            <div className="date-range-fields">
+              <label>Start Date<input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setActivePreset('custom'); }} /></label>
+              <span className="date-range-separator">to</span>
+              <label>End Date<input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => { setDateTo(e.target.value); setActivePreset('custom'); }} /></label>
+            </div>
+          )}
           
           <select value={accountId} onChange={e => setAccountId(e.target.value)} className="filter-select">
             <option value="">All Accounts</option>
@@ -228,10 +228,10 @@ export const Dashboard: React.FC = () => {
             {dbCategories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
 
-          {(accountId || source || kindFilter || categoryFilter || dateFrom || dateTo || selectedYear || selectedMonth) && (
+          {(accountId || source || kindFilter || categoryFilter || dateFrom || dateTo || activePreset !== 'all') && (
             <button className="btn-ghost" onClick={() => {
               setAccountId(''); setSource(''); setKindFilter(''); setCategoryFilter('');
-              setDateFrom(''); setDateTo(''); setSelectedYear(''); setSelectedMonth('');
+              setDateFrom(''); setDateTo(''); setActivePreset('all');
             }}>
               Clear Filters
             </button>

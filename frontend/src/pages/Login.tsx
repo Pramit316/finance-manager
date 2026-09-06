@@ -6,7 +6,9 @@
  */
 
 import React, { useState, type FormEvent } from 'react';
+import { Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import logo from '../assets/branding/fintrack f logo.png';
 
 export const Login: React.FC = () => {
   const { signIn } = useAuth();
@@ -14,6 +16,7 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -31,7 +34,7 @@ export const Login: React.FC = () => {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <div className="login-logo">₨</div>
+          <img className="login-logo" src={logo} alt="FinTrack" />
           <h1>FinTrack</h1>
           <p>Personal Finance Tracker</p>
         </div>
@@ -43,31 +46,14 @@ export const Login: React.FC = () => {
             </div>
           )}
 
-          <div className="form-group">
+          <div className="form-group login-field">
             <label htmlFor="login-email">Email</label>
-            <input
-              id="login-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              required
-              autoComplete="email"
-              autoFocus
-            />
+            <div className="login-input-wrap"><Mail size={17} /><input id="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required autoComplete="email" autoFocus /></div>
           </div>
 
-          <div className="form-group">
+          <div className="form-group login-field">
             <label htmlFor="login-password">Password</label>
-            <input
-              id="login-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              autoComplete="current-password"
-            />
+            <div className="login-input-wrap"><LockKeyhole size={17} /><input id="login-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" required autoComplete="current-password" /><button type="button" className="password-toggle" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
           </div>
 
           <button

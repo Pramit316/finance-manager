@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { LayoutDashboard, List, Upload, FileText, WalletCards, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import logo from '../assets/branding/fintrack f logo.png';
 
 export const Layout: React.FC = () => {
   const { signOut, user } = useAuth();
@@ -10,7 +11,7 @@ export const Layout: React.FC = () => {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="logo-icon">₨</div>
+          <img className="logo-icon" src={logo} alt="FinTrack" />
           <div>
             <h2 className="sidebar-title">FinTrack</h2>
             <p className="sidebar-subtitle">Personal Tracker</p>
