@@ -17,9 +17,8 @@ from app.models import Account, StatementImport, Transaction, MonthlyBudget, Bud
 # this is the Alembic Config object
 config = context.config
 
-# Override sqlalchemy.url from environment. Alembic stores this value in a
-# ConfigParser, where percent-encoded password characters must be doubled.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+# Override sqlalchemy.url from environment
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:

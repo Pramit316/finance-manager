@@ -144,6 +144,11 @@ export const Imports: React.FC = () => {
           <span>Duplicates skipped: <strong>{gmailResult.duplicates_skipped}</strong></span>
           <span>Failed: <strong style={{ color: gmailResult.failed ? 'var(--error)' : 'var(--success)' }}>{gmailResult.failed}</strong></span>
         </div>}
+        {gmailResult?.failures?.length > 0 && <div className="import-error" style={{ marginTop: '0.8rem' }}>
+          {gmailResult.failures.map((failure: { message_id: string; reason: string }) => (
+            <div key={failure.message_id}>{failure.message_id}: {failure.reason}</div>
+          ))}
+        </div>}
       </div>
 
       {loading ? (

@@ -68,7 +68,8 @@ def _account_for_alert(db: Session, account_number: str | None) -> Account:
 
 def sync_nabil_alerts(db: Session, connection: GmailConnection) -> dict:
     service = gmail_service(connection)
-    query = f"from:{settings.GMAIL_ALLOWED_SENDER}"
+    # Keep the sender restriction while also finding alerts filed outside Inbox.
+    query = f"from:{settings.GMAIL_ALLOWED_SENDER} in:anywhere"
     listed = []
     page_token = None
     while True:
