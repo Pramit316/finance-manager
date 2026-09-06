@@ -5,17 +5,17 @@ from sqlalchemy.engine.url import make_url
 
 
 def format_database_url(url: str) -> str:
-    """Ensure special characters in the database password are correctly percent-encoded."""
-    if not url or "://" not in url:
+    """Ensure special characters in the database password are correctly percent-encoded,
+    normalize postgres:// to postgresql://, and ensure SSL mode for Supabase."""
+    if not url:
         return url
 
-    # If it already parses cleanly with no '@' or '#' in host, return it
-    try:
-        parsed = make_url(url)
-        if "@" not in (parsed.host or "") and "#" not in (parsed.host or ""):
-            return parsed.render_as_string(hide_password=False)
-    except Exception:
-        pass
+    # Normalize deprecated postgres:// to postgresql:// for SQLAlchemy 2.0
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+
+    if "://" not in url:
+        return url
 
     prefix, remainder = url.split("://", 1)
     path_start = remainder.find("/")
@@ -36,7 +36,12 @@ def format_database_url(url: str) -> str:
             raw_password = userinfo[colon_idx + 1:]
             unquoted = urllib.parse.unquote(raw_password)
             encoded_password = urllib.parse.quote(unquoted, safe="")
-            return f"{prefix}://{username}:{encoded_password}@{hostport}{rest}"
+            url = f"{prefix}://{username}:{encoded_password}@{hostport}{rest}"
+
+    # Supabase connections require SSL
+    if "supabase.com" in url and "sslmode=" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}sslmode=require"
 
     return url
 
