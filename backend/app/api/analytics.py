@@ -205,9 +205,19 @@ def get_distinct_categories(db: Session = Depends(get_db)):
 
 
 @router.get("/accounts", response_model=list[AccountBalanceResponse])
-def get_account_balances(db: Session = Depends(get_db)):
-    """Get latest balance for all active accounts."""
-    return analytics.get_latest_account_balances(db)
+def get_account_balances(
+    date_to: Optional[date] = Query(None),
+    account_id: Optional[uuid.UUID] = Query(None),
+    source: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Get the latest known balance for each selected account."""
+    return analytics.get_latest_account_balances(
+        db,
+        account_id=account_id,
+        source=source,
+        date_to=date_to,
+    )
 
 
 @router.get("/budget")

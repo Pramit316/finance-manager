@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, ArrowLeftRight, AlertCircle, Filter } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import { Link } from 'react-router-dom';
@@ -40,12 +40,14 @@ export const Dashboard: React.FC = () => {
   const [spendingByAcc, setSpendingByAcc] = useState<any[]>([]);
   const [monthlyTrend, setMonthlyTrend] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [balanceAccounts, setBalanceAccounts] = useState<any[]>([]);
   const [recent, setRecent] = useState<any[]>([]);
   const [unknownCount, setUnknownCount] = useState(0);
   const [dbCategories, setDbCategories] = useState<string[]>([]);
   const [budget, setBudget] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
 
   // Filters
   const [accountId, setAccountId] = useState('');
@@ -57,6 +59,7 @@ export const Dashboard: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState('');
 
   const fetchAll = useCallback(async () => {
+    const generation = ++requestGeneration.current;
     setLoading(true);
     setError(null);
     
@@ -74,7 +77,7 @@ export const Dashboard: React.FC = () => {
 
       const [
         summaryRes, spendCatRes, incCatRes, spendAccRes, 
-        trendRes, unkRes, accsRes, recentRes, catsRes
+        trendRes, unkRes, accsRes, balanceAccsRes, recentRes, catsRes
       ] = await Promise.all([
         authFetch(`${API}/api/analytics/summary${q}`),
         authFetch(`${API}/api/analytics/categories${q}`),
@@ -83,11 +86,13 @@ export const Dashboard: React.FC = () => {
         authFetch(`${API}/api/analytics/monthly-trend${q}`),
         authFetch(`${API}/api/analytics/unknown-count${q}`),
         authFetch(`${API}/api/analytics/accounts`),
+        authFetch(`${API}/api/analytics/accounts?${new URLSearchParams({ ...(accountId ? { account_id: accountId } : {}), ...(source ? { source } : {}), ...(dateTo ? { date_to: dateTo } : {}) }).toString()}`),
         authFetch(`${API}/api/transactions/${q}${qs ? '&' : '?'}page=1&page_size=10`),
         authFetch(`${API}/api/analytics/distinct-categories`)
       ]);
 
       if (!summaryRes.ok) throw new Error(`Summary: ${summaryRes.status}`);
+      if (generation !== requestGeneration.current) return;
 
       setSummary(await summaryRes.json());
       setSpendingCats((await spendCatRes.json()).categories || []);
@@ -95,11 +100,13 @@ export const Dashboard: React.FC = () => {
       setSpendingByAcc((await spendAccRes.json()).accounts || []);
       setMonthlyTrend((await trendRes.json()).months || []);
       setUnknownCount((await unkRes.json()).count || 0);
-      setAccounts(await accsRes.json());
-      setRecent((await recentRes.json()).transactions || []);
-      setDbCategories((await catsRes.json()).categories || []);
       const now = new Date();
       const budgetRes = await authFetch(`${API}/api/analytics/budget?year=${now.getFullYear()}&month=${now.getMonth() + 1}`);
+      if (generation !== requestGeneration.current) return;
+      setAccounts(await accsRes.json());
+      setBalanceAccounts(await balanceAccsRes.json());
+      setRecent((await recentRes.json()).transactions || []);
+      setDbCategories((await catsRes.json()).categories || []);
       setBudget(budgetRes.ok ? await budgetRes.json() : null);
       
     } catch (err: any) {
@@ -111,9 +118,7 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const totalBalance = accountId
-    ? parseFloat(accounts.find(account => account.account_id === accountId)?.latest_balance ?? 0)
-    : accounts.reduce((acc, curr) => acc + parseFloat(curr.latest_balance ?? 0), 0);
+  const totalBalance = balanceAccounts.reduce((total, account) => total + parseFloat(account.latest_balance ?? 0), 0);
   
   const toDateInput = (date: Date) => {
     const year = date.getFullYear();
@@ -175,6 +180,14 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="page-container">
+      <div className="dashboard-hero">
+        <div>
+          <span className="eyebrow">FINTRACK / OVERVIEW</span>
+          <h1>Financial command center</h1>
+          <p className="page-subtitle">A clear view of your money, movement, and momentum.</p>
+        </div>
+        <div className="dashboard-hero-meta"><span className="status-dot" /> Live account intelligence</div>
+      </div>
     
       {/* ── Unknown TX Banner ──────────────────────────────────────── */}
       {unknownCount > 0 && (
@@ -216,6 +229,7 @@ export const Dashboard: React.FC = () => {
             <option value="">All Sources</option>
             <option value="NABIL">Nabil</option>
             <option value="ESEWA">eSewa</option>
+            <option value="STANDARD_CHARTERED">Standard Chartered</option>
           </select>
 
           <select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className="filter-select">
@@ -252,7 +266,7 @@ export const Dashboard: React.FC = () => {
         <>
           {/* ── KPI Row ─────────────────────────────────────────────── */}
           <div className="kpi-grid">
-            <div className="kpi-card">
+            <div className="kpi-card kpi-balance">
               <div className="kpi-icon" style={{ background: 'rgba(79,142,247,0.15)' }}>
                 <DollarSign size={24} color="#4f8ef7" />
               </div>

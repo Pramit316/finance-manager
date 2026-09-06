@@ -1540,6 +1540,7 @@ Do not implement future phases unless explicitly requested or required by the cu
 
 * **Filtering:** The application uses a shared `filter_service.py` to ensure consistent filter application across both transaction list endpoints and analytics aggregation endpoints.
 * **Analytics:** Financial totals (income, spending, cash flow) and trend metrics are calculated using server-side SQL aggregation. Internal transfers are correctly excluded from income/spending totals and tracked independently.
+* **Account balances:** `/api/analytics/accounts` derives each active account's balance from its latest stored transaction with a non-null `balance_after`. Ordering is by transaction date, transaction timestamp when available, then descending source statement row number, with transaction ID as a deterministic final tie-breaker. Optional `account_id` selects one account, and `date_to` returns the latest known balance on or before that date for as-of dashboard totals.
 * **Dashboard date filtering:** The dashboard sends optional `date_from` and `date_to` ISO dates to the existing analytics endpoints. Presets are resolved in the browser using local calendar dates; custom ranges use the same server-side filters. An empty range preserves the existing all-time behavior.
 * **Classification:** Classification is deterministic and executes automatically after successful statement import. A safe `/api/transactions/reclassify-all` endpoint exists to apply rules to existing records while preserving manual user overrides.
 

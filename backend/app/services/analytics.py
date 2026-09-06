@@ -64,23 +64,45 @@ def _base_filtered_query(
     )
 
 
-def get_latest_account_balances(db: Session) -> list[dict]:
-    """Calculate the latest known balance for each active account."""
-    accounts = db.query(Account).filter(Account.is_active == True).all()
+def get_latest_account_balances(
+    db: Session,
+    *,
+    account_id=None,
+    source: str | None = None,
+    date_to: date | None = None,
+) -> list[dict]:
+    """Calculate the latest known balance for each selected account.
+
+    ``date_to`` is an as-of boundary for balances, rather than a transaction
+    range boundary. This preserves the last known balance when an account has
+    no transaction inside the dashboard's visible period.
+    """
+    account_query = db.query(Account).filter(Account.is_active == True)
+    if account_id is not None:
+        account_query = account_query.filter(Account.id == account_id)
+    if source:
+        account_query = account_query.filter(Account.institution == source)
+    accounts = account_query.all()
     results = []
 
     for account in accounts:
         # Find the latest transaction that has a balance_after value
+        txn_query = db.query(Transaction).filter(
+            Transaction.account_id == account.id,
+            Transaction.balance_after.isnot(None),
+        )
+        if date_to is not None:
+            txn_query = txn_query.filter(Transaction.transaction_date <= date_to)
+
         latest_txn = (
-            db.query(Transaction)
-            .filter(
-                Transaction.account_id == account.id,
-                Transaction.balance_after.isnot(None)
-            )
+            txn_query
             .order_by(
                 Transaction.transaction_date.desc(),
                 Transaction.transaction_timestamp.desc().nulls_last(),
-                Transaction.source_row_number.asc().nulls_last()
+                # Source row numbers represent statement order for sources
+                # without transaction timestamps (for example Nabil PDF).
+                Transaction.source_row_number.desc().nulls_last(),
+                Transaction.id.desc(),
             )
             .first()
         )

@@ -74,7 +74,7 @@ def setup_import(test_db, setup_accounts):
     return stmt1, stmt2
 
 
-def create_transaction(db, account, statement, amount, description, txn_date=date(2026, 8, 1), user_override=False):
+def create_transaction(db, account, statement, amount, description, txn_date=date(2026, 8, 1), user_override=False, balance_after="1000.00", source_row_number=None, transaction_timestamp=None):
     t = Transaction(
         account_id=account.id,
         statement_import_id=statement.id,
@@ -83,7 +83,9 @@ def create_transaction(db, account, statement, amount, description, txn_date=dat
         description_raw=description,
         amount=Decimal(amount),
         transaction_hash=str(uuid.uuid4()),
-        balance_after=Decimal("1000.00")
+        balance_after=Decimal(balance_after) if balance_after is not None else None,
+        source_row_number=source_row_number,
+        transaction_timestamp=transaction_timestamp,
     )
     if user_override:
         t.transaction_kind = TransactionKind.EXPENSE
@@ -327,3 +329,133 @@ def test_analytics(test_db, setup_accounts, setup_import):
     assert len(balances) == 2
     for b in balances:
         assert b["latest_balance"] == Decimal("1000.00")
+
+
+def test_latest_account_balances_support_account_selection_and_as_of_date(test_db, setup_accounts, setup_import):
+    acc1, acc2 = setup_accounts
+    stmt1, stmt2 = setup_import
+
+    create_transaction(test_db, acc1, stmt1, "100", "Earlier Nabil", date(2026, 8, 1), balance_after="193000.00")
+    create_transaction(test_db, acc1, stmt1, "100", "Latest Nabil", date(2026, 8, 20), balance_after="193340.96")
+    create_transaction(test_db, acc2, stmt2, "100", "Earlier eSewa", date(2026, 8, 5), balance_after="300.00")
+    create_transaction(test_db, acc2, stmt2, "100", "Latest eSewa", date(2026, 8, 25), balance_after="407.64")
+
+    balances = analytics.get_latest_account_balances(test_db)
+    assert {row["account_id"]: row["latest_balance"] for row in balances} == {
+        acc1.id: Decimal("193340.96"),
+        acc2.id: Decimal("407.64"),
+    }
+
+    selected = analytics.get_latest_account_balances(test_db, account_id=acc1.id)
+    assert len(selected) == 1
+    assert selected[0]["latest_balance"] == Decimal("193340.96")
+
+    as_of = analytics.get_latest_account_balances(test_db, date_to=date(2026, 8, 10))
+    assert {row["account_id"]: row["latest_balance"] for row in as_of} == {
+        acc1.id: Decimal("193000.00"),
+        acc2.id: Decimal("300.00"),
+    }
+
+
+def test_latest_account_balance_uses_statement_order_for_same_date(test_db, setup_accounts, setup_import):
+    nabil, esewa = setup_accounts
+    nabil_stmt, esewa_stmt = setup_import
+    standard = Account(
+        name="Standard Chartered Test",
+        institution="STANDARD_CHARTERED",
+        account_type=AccountType.BANK,
+    )
+    test_db.add(standard)
+    test_db.commit()
+    standard_stmt = StatementImport(
+        account_id=standard.id,
+        source=StatementSource.STANDARD_CHARTERED,
+        filename="standard.pdf",
+        file_hash="same-date-standard-hash",
+        status=ImportStatus.IMPORTED,
+    )
+    test_db.add(standard_stmt)
+    test_db.commit()
+
+    # Nabil statement serial numbers are chronological within a date.
+    create_transaction(
+        test_db, nabil, nabil_stmt, "-1269.00", "POS PUR/50009142/BHATBH ATEN",
+        date(2026, 9, 5), balance_after="204264.99", source_row_number=10,
+    )
+    create_transaction(
+        test_db, nabil, nabil_stmt, "-10924.03", "POS PUR/99994945/BBSM-BHAKT",
+        date(2026, 9, 5), balance_after="193340.96", source_row_number=11,
+    )
+
+    # eSewa uses timestamp ordering when multiple rows share a date.
+    create_transaction(
+        test_db, esewa, esewa_stmt, "-10.00", "Earlier eSewa",
+        date(2026, 9, 5), balance_after="100.00", source_row_number=20,
+        transaction_timestamp=datetime(2026, 9, 5, 9, 0, tzinfo=timezone.utc),
+    )
+    create_transaction(
+        test_db, esewa, esewa_stmt, "-5.00", "Later eSewa",
+        date(2026, 9, 5), balance_after="95.00", source_row_number=19,
+        transaction_timestamp=datetime(2026, 9, 5, 10, 0, tzinfo=timezone.utc),
+    )
+
+    # Standard Chartered has no timestamp, so its statement row is the tie-breaker.
+    create_transaction(
+        test_db, standard, standard_stmt, "-20.00", "Earlier Standard",
+        date(2026, 9, 5), balance_after="200.00", source_row_number=1,
+    )
+    create_transaction(
+        test_db, standard, standard_stmt, "-30.00", "Later Standard",
+        date(2026, 9, 5), balance_after="170.00", source_row_number=2,
+    )
+
+    balances = analytics.get_latest_account_balances(test_db, date_to=date(2026, 9, 5))
+    assert {row["account_id"]: row["latest_balance"] for row in balances} == {
+        nabil.id: Decimal("193340.96"),
+        esewa.id: Decimal("95.00"),
+        standard.id: Decimal("170.00"),
+    }
+
+
+def test_latest_account_balance_ignores_transactions_without_balance(test_db, setup_accounts, setup_import):
+    acc1, _ = setup_accounts
+    stmt1, _ = setup_import
+
+    create_transaction(test_db, acc1, stmt1, "100", "Known balance", date(2026, 8, 1), balance_after="500.00")
+    create_transaction(test_db, acc1, stmt1, "100", "Missing balance", date(2026, 8, 20), balance_after=None)
+
+    balances = analytics.get_latest_account_balances(test_db, account_id=acc1.id)
+    assert balances[0]["latest_balance"] == Decimal("500.00")
+
+
+def test_latest_account_balances_filter_all_single_multiple_and_source(test_db, setup_accounts, setup_import):
+    nabil, esewa = setup_accounts
+    nabil_stmt, esewa_stmt = setup_import
+    standard = Account(
+        name="Standard Chartered Test",
+        institution="STANDARD_CHARTERED",
+        account_type=AccountType.BANK,
+    )
+    test_db.add(standard)
+    test_db.commit()
+    standard_stmt = StatementImport(
+        account_id=standard.id,
+        source=StatementSource.STANDARD_CHARTERED,
+        filename="standard.pdf",
+        file_hash="standard-hash",
+        status=ImportStatus.IMPORTED,
+    )
+    test_db.add(standard_stmt)
+    test_db.commit()
+
+    create_transaction(test_db, nabil, nabil_stmt, "100", "Nabil balance", date(2026, 8, 20), balance_after="193340.96")
+    create_transaction(test_db, esewa, esewa_stmt, "100", "eSewa balance", date(2026, 8, 20), balance_after="407.64")
+    create_transaction(test_db, standard, standard_stmt, "100", "Standard balance", date(2026, 8, 20), balance_after="63177.00")
+
+    all_balances = analytics.get_latest_account_balances(test_db)
+    assert sum(row["latest_balance"] for row in all_balances) == Decimal("256925.60")
+    assert analytics.get_latest_account_balances(test_db, account_id=nabil.id)[0]["latest_balance"] == Decimal("193340.96")
+    assert analytics.get_latest_account_balances(test_db, account_id=esewa.id)[0]["latest_balance"] == Decimal("407.64")
+    assert analytics.get_latest_account_balances(test_db, account_id=standard.id)[0]["latest_balance"] == Decimal("63177.00")
+    assert sum(row["latest_balance"] for row in analytics.get_latest_account_balances(test_db, account_id=nabil.id)) + sum(row["latest_balance"] for row in analytics.get_latest_account_balances(test_db, account_id=esewa.id)) == Decimal("193748.60")
+    assert sum(row["latest_balance"] for row in analytics.get_latest_account_balances(test_db, source="STANDARD_CHARTERED")) == Decimal("63177.00")
