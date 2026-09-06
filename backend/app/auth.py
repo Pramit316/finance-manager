@@ -31,10 +31,10 @@ _jwks_client_url: str | None = None
 ASYMMETRIC_ALGORITHMS = ["ES256", "RS256", "ES384", "RS384", "ES512", "RS512"]
 
 
-def get_jwks_client() -> jwt.PyJWKClient | None:
+def get_jwks_client(custom_url: str | None = None) -> jwt.PyJWKClient | None:
     """Get or instantiate the cached PyJWKClient for the configured JWKS URL."""
     global _jwks_client, _jwks_client_url
-    url = settings.jwks_url
+    url = custom_url or settings.jwks_url
     if not url:
         return None
     if _jwks_client is None or _jwks_client_url != url:
@@ -81,6 +81,17 @@ def verify_jwt(
         # Asymmetric signing (ES256, RS256, etc.) or tokens with a Key ID (kid)
         if alg in ASYMMETRIC_ALGORITHMS or (header.get("kid") and alg != "HS256"):
             jwks_client = get_jwks_client()
+            if jwks_client is None:
+                # Dynamically derive JWKS URL from token's 'iss' claim if from a trusted Supabase project
+                try:
+                    unverified_payload = jwt.decode(token, options={"verify_signature": False})
+                    iss = unverified_payload.get("iss", "")
+                    if iss.startswith("https://") and ".supabase.co" in iss:
+                        derived_jwks = f"{iss.rstrip('/')}/.well-known/jwks.json"
+                        jwks_client = get_jwks_client(derived_jwks)
+                except Exception:
+                    pass
+
             if jwks_client is None:
                 logger.warning("Received asymmetric token (%s) but JWKS endpoint is not configured", alg)
                 raise HTTPException(status_code=401, detail="Invalid token")

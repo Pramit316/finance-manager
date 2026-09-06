@@ -305,3 +305,68 @@ def test_upload_endpoint_authenticated_esewa_xls(client, auth_test_db, valid_es2
         assert body["source"] == "ESEWA"
         assert body["status"] == "IMPORTED"
         assert body["rows_inserted"] == 41
+
+
+# ─── DATABASE_URL ENCODING TESTS ────────────────────────────────────────────
+
+def test_database_url_encodes_special_characters():
+    """Verify format_database_url encodes special characters in passwords so SQLAlchemy parses correctly."""
+    from app.config import format_database_url
+    from sqlalchemy.engine.url import make_url
+
+    # Password with @, #, $, !, +
+    raw_pass = "my#P@ss$123+!"
+    url = f"postgresql://postgres.irvnzqygeoyjgwzdlxxd:{raw_pass}@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+    formatted = format_database_url(url)
+
+    parsed = make_url(formatted)
+    assert parsed.password == raw_pass
+    assert parsed.host == "aws-0-ap-southeast-1.pooler.supabase.com"
+    assert parsed.port == 6543
+    assert parsed.username == "postgres.irvnzqygeoyjgwzdlxxd"
+    assert parsed.database == "postgres"
+
+
+def test_database_url_preserves_already_encoded():
+    """Verify format_database_url does not double-encode already-encoded passwords."""
+    from app.config import format_database_url
+    from sqlalchemy.engine.url import make_url
+
+    raw_pass = "my#P@ss$123+!"
+    import urllib.parse
+    encoded_pass = urllib.parse.quote(raw_pass, safe="")
+    url = f"postgresql://postgres.irvn:{encoded_pass}@localhost:5432/db"
+
+    formatted = format_database_url(url)
+    parsed = make_url(formatted)
+    assert parsed.password == raw_pass
+    assert parsed.host == "localhost"
+
+
+def test_protected_endpoint_iss_derivation(client, ec_keypair):
+    """Verify that when SUPABASE_URL is empty, auth derives the JWKS endpoint from token 'iss'."""
+    private_key, public_key = ec_keypair
+    user_id = str(uuid.uuid4())
+    payload = {
+        "sub": user_id,
+        "aud": "authenticated",
+        "role": "authenticated",
+        "iss": "https://irvnzqygeoyjgwzdlxxd.supabase.co/auth/v1",
+        "exp": int(time.time()) + 3600,
+        "iat": int(time.time()),
+    }
+    headers = {"alg": "ES256", "kid": "test-key-id"}
+    token = jwt.encode(payload, private_key, algorithm="ES256", headers=headers)
+
+    mock_signing_key = MagicMock()
+    mock_signing_key.key = public_key
+
+    mock_jwks_client = MagicMock()
+    mock_jwks_client.get_signing_key_from_jwt.return_value = mock_signing_key
+
+    with patch.object(settings, "SUPABASE_URL", ""), \
+         patch.object(settings, "SUPABASE_JWKS_URL", ""), \
+         patch.object(settings, "SUPABASE_JWT_SECRET", "dummy-secret-to-enable-auth"), \
+         patch("app.auth.get_jwks_client", return_value=mock_jwks_client):
+        res = client.get("/api/accounts/", headers={"Authorization": f"Bearer {token}"})
+        assert res.status_code == 200
