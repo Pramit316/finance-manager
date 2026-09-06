@@ -19,7 +19,16 @@ import { supabase } from './supabase';
  * The URL and options work exactly like the standard Fetch API.
  */
 export async function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const { data: { session } } = await supabase.auth.getSession();
+  let { data: { session } } = await supabase.auth.getSession();
+
+  // If session is expired or expiring within 30 seconds, refresh before sending request
+  if (session?.expires_at && session.expires_at * 1000 < Date.now() + 30000) {
+    const { data } = await supabase.auth.refreshSession();
+    if (data.session) {
+      session = data.session;
+    }
+  }
+
   const token = session?.access_token;
 
   const headers = new Headers(init?.headers);

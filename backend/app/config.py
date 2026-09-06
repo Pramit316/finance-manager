@@ -12,8 +12,14 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
     ENVIRONMENT: str = "development"
 
-    # Supabase JWT verification
-    # Found in Supabase Dashboard → Settings → API → JWT Secret
+    # Supabase authentication
+    # Recommended: SUPABASE_URL (e.g. https://<project-ref>.supabase.co) fetches
+    # asymmetric public keys from the JWKS endpoint.
+    SUPABASE_URL: str = ""
+    SUPABASE_JWKS_URL: str = ""
+    SUPABASE_JWT_AUDIENCE: str = "authenticated"
+
+    # Legacy symmetric JWT secret (for backward-compatibility with HS256)
     SUPABASE_JWT_SECRET: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
@@ -27,9 +33,18 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT.lower() == "production"
 
     @property
+    def jwks_url(self) -> str | None:
+        """Derive the JWKS endpoint URL from SUPABASE_JWKS_URL or SUPABASE_URL."""
+        if self.SUPABASE_JWKS_URL:
+            return self.SUPABASE_JWKS_URL
+        if self.SUPABASE_URL:
+            return f"{self.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        return None
+
+    @property
     def auth_enabled(self) -> bool:
-        """Auth is enabled when a JWT secret is configured."""
-        return bool(self.SUPABASE_JWT_SECRET)
+        """Auth is enabled when JWKS URL or JWT secret is configured."""
+        return bool(self.jwks_url or self.SUPABASE_JWT_SECRET)
 
 
 settings = Settings()

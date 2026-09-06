@@ -181,6 +181,15 @@ can safely rerun classification and matching for existing data.
 
 Next.js or Vite React may be used depending on which provides the simplest maintainable implementation.
 
+## Authentication
+
+* Supabase Auth
+* Frontend sends user session access token via `Authorization: Bearer <token>`
+* Backend verifies asymmetric signing keys (`ES256`, `RS256`) dynamically from Supabase project JWKS endpoint (`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`) with cached keys (`PyJWKClient`)
+* Legacy symmetric HS256 fallback supported when `SUPABASE_JWT_SECRET` is configured
+* Claims verification: audience `authenticated`, `role != 'anon'`, and user `sub` presence
+* `SUPABASE_JWT_SECRET` is not required on Render when `SUPABASE_URL` is configured
+
 ## Data Processing
 
 * normal Python
