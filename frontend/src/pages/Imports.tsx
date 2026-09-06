@@ -67,7 +67,13 @@ export const Imports: React.FC = () => {
       .finally(() => setLoading(false));
     loadGmailStatus();
     const onMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'fintrack-gmail-oauth') loadGmailStatus();
+      if (event.data?.type === 'fintrack-gmail-oauth') {
+        if (event.data.connected) {
+          loadGmailStatus();
+        } else {
+          setGmailError(event.data.message || 'Google connection failed');
+        }
+      }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);

@@ -34,6 +34,7 @@ def connect_gmail(user: dict | None = Depends(verify_jwt)):
 
 @router.get("/oauth/callback", response_class=HTMLResponse, include_in_schema=False)
 def gmail_oauth_callback(code: str = Query(...), state: str = Query(...), db: Session = Depends(get_db)):
+    connected = False
     try:
         user_id = validate_oauth_state(state)
         credentials = exchange_code(code)
@@ -56,11 +57,17 @@ def gmail_oauth_callback(code: str = Query(...), state: str = Query(...), db: Se
                 setattr(connection, key, value)
         db.commit()
         message = "Gmail connected. You can close this window."
+        connected = True
     except Exception as exc:
         db.rollback()
         message = f"Gmail connection failed: {exc}"
     safe_message = html.escape(message)
-    return HTMLResponse(f"<html><body><p>{safe_message}</p><script>window.opener?.postMessage({{type: 'fintrack-gmail-oauth'}}, '*'); window.close();</script></body></html>")
+    safe_connected = "true" if connected else "false"
+    return HTMLResponse(
+        f"<html><body><p>{safe_message}</p><script>"
+        f"window.opener?.postMessage({{type: 'fintrack-gmail-oauth', connected: {safe_connected}, message: {__import__('json').dumps(message)}}}, '*');"
+        "window.close();</script></body></html>"
+    )
 
 
 @router.get("/status")
