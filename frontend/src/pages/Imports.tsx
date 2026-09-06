@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FileText, CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react';
+import { FileText, CheckCircle, AlertTriangle, XCircle, Clock, Mail, RefreshCw, Unplug } from 'lucide-react';
 import { API } from '../config';
 import { authFetch } from '../lib/api';
 
@@ -50,6 +50,14 @@ export const Imports: React.FC = () => {
   const [imports, setImports] = useState<ImportRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [gmail, setGmail] = useState<{ connected: boolean; email: string | null; last_successful_sync_at: string | null }>({ connected: false, email: null, last_successful_sync_at: null });
+  const [gmailBusy, setGmailBusy] = useState(false);
+  const [gmailResult, setGmailResult] = useState<any>(null);
+  const [gmailError, setGmailError] = useState<string | null>(null);
+
+  const loadGmailStatus = () => {
+    authFetch(`${API}/api/gmail/status`).then(r => r.json()).then(setGmail).catch(() => undefined);
+  };
 
   useEffect(() => {
     authFetch(`${API}/api/imports/`)
@@ -57,7 +65,47 @@ export const Imports: React.FC = () => {
       .then(data => setImports(data))
       .catch(console.error)
       .finally(() => setLoading(false));
+    loadGmailStatus();
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'fintrack-gmail-oauth') loadGmailStatus();
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
+
+  const connectGmail = async () => {
+    setGmailBusy(true); setGmailError(null);
+    try {
+      const response = await authFetch(`${API}/api/gmail/connect`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Could not start Gmail connection');
+      window.open(data.authorization_url, 'fintrack-gmail-oauth', 'width=600,height=720');
+    } catch (err: any) { setGmailError(err.message); }
+    finally { setGmailBusy(false); }
+  };
+
+  const syncGmail = async () => {
+    setGmailBusy(true); setGmailError(null); setGmailResult(null);
+    try {
+      const response = await authFetch(`${API}/api/gmail/sync`, { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Gmail sync failed');
+      setGmailResult(data); loadGmailStatus();
+      const importsResponse = await authFetch(`${API}/api/imports/`);
+      if (importsResponse.ok) setImports(await importsResponse.json());
+    } catch (err: any) { setGmailError(err.message); }
+    finally { setGmailBusy(false); }
+  };
+
+  const disconnectGmail = async () => {
+    setGmailBusy(true); setGmailError(null);
+    try {
+      const response = await authFetch(`${API}/api/gmail/disconnect`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Could not disconnect Gmail');
+      setGmail({ connected: false, email: null, last_successful_sync_at: null });
+    } catch (err: any) { setGmailError(err.message); }
+    finally { setGmailBusy(false); }
+  };
 
   return (
     <div className="page-container">
@@ -66,6 +114,36 @@ export const Imports: React.FC = () => {
           <h2>Statement Imports</h2>
           <p className="page-subtitle">{imports.length} statement{imports.length !== 1 ? 's' : ''} imported</p>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <Mail size={22} color="var(--accent-primary)" />
+            <div>
+              <h3 style={{ marginBottom: '0.15rem' }}>Nabil Gmail Alerts</h3>
+              <p className="page-subtitle">Manual sync from txn-alert@nabilbank.com</p>
+              {gmail.connected && <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>{gmail.email} · {gmail.last_successful_sync_at ? `Last sync ${new Date(gmail.last_successful_sync_at).toLocaleString()}` : 'Never synced'}</p>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {!gmail.connected ? (
+              <button className="btn" onClick={connectGmail} disabled={gmailBusy}><Mail size={16} /> Connect Gmail</button>
+            ) : (
+              <>
+                <button className="btn" onClick={syncGmail} disabled={gmailBusy}><RefreshCw size={16} /> {gmailBusy ? 'Syncing...' : 'Sync Gmail Transactions'}</button>
+                <button className="btn btn-secondary" onClick={disconnectGmail} disabled={gmailBusy}><Unplug size={16} /> Disconnect</button>
+              </>
+            )}
+          </div>
+        </div>
+        {gmailError && <div className="import-error" style={{ marginTop: '0.8rem' }}><AlertTriangle size={14} /> {gmailError}</div>}
+        {gmailResult && <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginTop: '1rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+          <span>Emails found: <strong>{gmailResult.emails_found}</strong></span>
+          <span>New transactions: <strong>{gmailResult.new_transactions}</strong></span>
+          <span>Duplicates skipped: <strong>{gmailResult.duplicates_skipped}</strong></span>
+          <span>Failed: <strong style={{ color: gmailResult.failed ? 'var(--error)' : 'var(--success)' }}>{gmailResult.failed}</strong></span>
+        </div>}
       </div>
 
       {loading ? (

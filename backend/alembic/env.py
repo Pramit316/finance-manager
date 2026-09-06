@@ -12,13 +12,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings
 from app.database import Base
-from app.models import Account, StatementImport, Transaction, MonthlyBudget, BudgetAllocation  # noqa: F401
+from app.models import Account, StatementImport, Transaction, MonthlyBudget, BudgetAllocation, GmailConnection, GmailMessage  # noqa: F401
 
 # this is the Alembic Config object
 config = context.config
 
-# Override sqlalchemy.url from environment
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Override sqlalchemy.url from environment. Alembic stores this value in a
+# ConfigParser, where percent-encoded password characters must be doubled.
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:

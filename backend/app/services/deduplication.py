@@ -28,6 +28,8 @@ def compute_transaction_hash(
         return _compute_nabil_hash(txn, account_id)
     elif txn.source == "STANDARD_CHARTERED":
         return _compute_standard_chartered_hash(txn, account_id)
+    elif txn.source == "GMAIL_TRANSACTION_ALERT":
+        return _compute_gmail_hash(txn, account_id)
     else:
         return _compute_generic_hash(txn, account_id)
 
@@ -87,6 +89,17 @@ def _compute_standard_chartered_hash(txn: ParsedTransaction, account_id: str) ->
     """Standard Chartered fingerprint uses date, both columns, balance, and description."""
     components = [
         "STANDARD_CHARTERED", account_id, txn.transaction_date.isoformat(),
+        str(txn.debit_amount or "0"), str(txn.credit_amount or "0"),
+        str(txn.balance_after or ""), " ".join(txn.description_raw.split()),
+    ]
+    return hashlib.sha256("|".join(components).encode("utf-8")).hexdigest()
+
+
+def _compute_gmail_hash(txn: ParsedTransaction, account_id: str) -> str:
+    """Fingerprint alert contents, excluding Gmail message ID for safety."""
+    components = [
+        "GMAIL_TRANSACTION_ALERT", account_id,
+        txn.transaction_timestamp.isoformat() if txn.transaction_timestamp else txn.transaction_date.isoformat(),
         str(txn.debit_amount or "0"), str(txn.credit_amount or "0"),
         str(txn.balance_after or ""), " ".join(txn.description_raw.split()),
     ]

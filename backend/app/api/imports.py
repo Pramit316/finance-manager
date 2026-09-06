@@ -37,8 +37,10 @@ async def upload_statement(
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported source: {source}. Must be ESEWA, NABIL, or STANDARD_CHARTERED.",
+            detail=f"Unsupported upload source: {source}. Must be ESEWA, NABIL, or STANDARD_CHARTERED.",
         )
+    if source_enum == StatementSource.GMAIL_TRANSACTION_ALERT:
+        raise HTTPException(status_code=400, detail="Gmail alerts must be imported through the Gmail sync endpoint")
 
     # Read file
     file_bytes = await file.read()

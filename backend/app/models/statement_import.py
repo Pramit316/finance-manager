@@ -36,6 +36,7 @@ class StatementSource(str, enum.Enum):
     NABIL = "NABIL"
     STANDARD_CHARTERED = "STANDARD_CHARTERED"
     MANUAL = "MANUAL"
+    GMAIL_TRANSACTION_ALERT = "GMAIL_TRANSACTION_ALERT"
 
 
 class StatementImport(Base):

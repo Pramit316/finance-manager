@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # Legacy symmetric JWT secret (for backward-compatibility with HS256)
     SUPABASE_JWT_SECRET: str = ""
 
+    # Gmail OAuth integration
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = ""
+    GMAIL_TOKEN_ENCRYPTION_KEY: str = ""
+    GMAIL_ALLOWED_SENDER: str = "txn-alert@nabilbank.com"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @field_validator("DATABASE_URL", mode="after")

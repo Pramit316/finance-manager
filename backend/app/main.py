@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.auth import verify_jwt
 from app.config import settings
-from app.api import accounts, imports, transactions, analytics, budgets
+from app.api import accounts, imports, transactions, analytics, budgets, gmail
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,9 @@ app.include_router(imports.router, prefix="/api/imports", tags=["imports"], depe
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"], dependencies=_auth)
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"], dependencies=_auth)
 app.include_router(budgets.router, prefix="/api/budgets", tags=["budgets"], dependencies=_auth)
+# Gmail callback is intentionally public; protected Gmail endpoints declare auth
+# dependencies individually and validate the Supabase user subject.
+app.include_router(gmail.router, prefix="/api/gmail", tags=["gmail"])
 
 
 @app.get("/health")
