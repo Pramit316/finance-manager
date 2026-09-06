@@ -14,6 +14,13 @@ def format_database_url(url: str) -> str:
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
 
+    # Convert IPv6-only direct Supabase host to IPv4 connection pooler (Render does not support IPv6 outbound)
+    if "db.irvnzqygeoyjgwzdlxxd.supabase.co" in url:
+        url = url.replace("db.irvnzqygeoyjgwzdlxxd.supabase.co:5432", "aws-0-ap-northeast-1.pooler.supabase.com:6543")
+        url = url.replace("db.irvnzqygeoyjgwzdlxxd.supabase.co", "aws-0-ap-northeast-1.pooler.supabase.com:6543")
+        if "://postgres:" in url:
+            url = url.replace("://postgres:", "://postgres.irvnzqygeoyjgwzdlxxd:")
+
     if "://" not in url:
         return url
 

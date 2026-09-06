@@ -370,3 +370,19 @@ def test_protected_endpoint_iss_derivation(client, ec_keypair):
          patch("app.auth.get_jwks_client", return_value=mock_jwks_client):
         res = client.get("/api/accounts/", headers={"Authorization": f"Bearer {token}"})
         assert res.status_code == 200
+
+
+def test_database_url_converts_direct_supabase_to_pooler():
+    """Verify that direct IPv6-only Supabase URLs are translated to IPv4 connection poolers."""
+    from app.config import format_database_url
+    from sqlalchemy.engine.url import make_url
+
+    raw_url = "postgresql://postgres:mysecretpass@db.irvnzqygeoyjgwzdlxxd.supabase.co:5432/postgres"
+    formatted = format_database_url(raw_url)
+    parsed = make_url(formatted)
+
+    assert parsed.host == "aws-0-ap-northeast-1.pooler.supabase.com"
+    assert parsed.port == 6543
+    assert parsed.username == "postgres.irvnzqygeoyjgwzdlxxd"
+    assert parsed.password == "mysecretpass"
+    assert "sslmode=require" in formatted
