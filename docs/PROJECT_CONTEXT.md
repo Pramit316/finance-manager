@@ -57,6 +57,12 @@ to `text/plain`, and maps the labeled table columns to the existing canonical
 transaction model. Surrounding masked account text is used for NABIL account
 mapping when it is outside the table.
 
+NABIL Gmail account mapping normalizes display formatting and supports masked
+account numbers generically. Literal digits must match the stored full account,
+mask runs (`#`, `*`, or `x`) match the same number of digits, and the complete
+normalized account length must match. Multiple masked matches are rejected as
+ambiguous rather than guessed.
+
 ---
 
 # Core Product Flow

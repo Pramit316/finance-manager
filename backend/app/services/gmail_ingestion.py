@@ -66,16 +66,62 @@ def _account_for_alert(db: Session, account_number: str | None) -> Account:
     if not accounts:
         raise ValueError("No active NABIL account exists")
     if account_number:
-        digits = re.sub(r"\D", "", account_number)
-        matches = [a for a in accounts if not a.account_number or digits.endswith(re.sub(r"\D", "", a.account_number)) or re.sub(r"\D", "", a.account_number).endswith(digits)]
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
+        normalized_alert = _normalize_account_number(account_number)
+        if not normalized_alert:
+            raise ValueError("NABIL alert account number is invalid")
+
+        full_accounts = {
+            account: _normalize_account_number(account.account_number)
+            for account in accounts
+            if account.account_number
+        }
+        if not _contains_mask(normalized_alert):
+            exact_matches = [account for account, normalized in full_accounts.items() if normalized == normalized_alert]
+            if len(exact_matches) == 1:
+                return exact_matches[0]
+            if len(exact_matches) > 1:
+                raise ValueError("NABIL account mapping is ambiguous")
+
+        pattern = _masked_account_pattern(normalized_alert)
+        masked_matches = [
+            account for account, normalized in full_accounts.items()
+            if pattern.fullmatch(normalized)
+        ]
+        if len(masked_matches) == 1:
+            return masked_matches[0]
+        if len(masked_matches) > 1:
             raise ValueError("NABIL account mapping is ambiguous")
         raise ValueError("NABIL alert account does not match an existing account")
     if len(accounts) != 1:
         raise ValueError("NABIL account mapping is ambiguous")
     return accounts[0]
+
+
+def _normalize_account_number(value: str | None) -> str:
+    """Remove display formatting while retaining generic account mask characters."""
+    return re.sub(r"[^0-9#*xX]", "", value or "").lower().replace("x", "#")
+
+
+def _contains_mask(value: str) -> bool:
+    return "#" in value or "*" in value
+
+
+def _masked_account_pattern(value: str) -> re.Pattern[str]:
+    parts: list[str] = []
+    index = 0
+    while index < len(value):
+        if value[index] in "#*":
+            end = index
+            while end < len(value) and value[end] in "#*":
+                end += 1
+            parts.append(rf"\d{{{end - index}}}")
+            index = end
+        elif value[index].isdigit():
+            parts.append(value[index])
+            index += 1
+        else:
+            raise ValueError("NABIL alert account number is invalid")
+    return re.compile("".join(parts))
 
 
 def sync_nabil_alerts(db: Session, connection: GmailConnection) -> dict:

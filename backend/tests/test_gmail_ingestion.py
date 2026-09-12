@@ -93,11 +93,52 @@ def _html_message(message_id, html_body, plain_body, *, sender="txn-alert@nabilb
     }
 
 
+def _account_db(*account_numbers):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    for index, account_number in enumerate(account_numbers):
+        db.add(Account(name=f"Nabil {index}", institution="NABIL", account_type=AccountType.BANK, account_number=account_number))
+    db.commit()
+    return db
+
+
+def test_masked_nabil_account_matches_full_account():
+    db = _account_db("3410017508963")
+    assert gmail_ingestion._account_for_alert(db, "341#####08963").account_number == "3410017508963"
+
+
+def test_masked_nabil_account_rejects_incorrect_prefix_and_suffix():
+    db = _account_db("3410017508963")
+    for masked in ("342#####08963", "341#####08964"):
+        try:
+            gmail_ingestion._account_for_alert(db, masked)
+        except ValueError as exc:
+            assert str(exc) == "NABIL alert account does not match an existing account"
+        else:
+            raise AssertionError("mismatched masked account was accepted")
+
+
+def test_masked_nabil_account_rejects_ambiguous_matches():
+    db = _account_db("3410017508963", "3419999908963")
+    try:
+        gmail_ingestion._account_for_alert(db, "341#####08963")
+    except ValueError as exc:
+        assert str(exc) == "NABIL account mapping is ambiguous"
+    else:
+        raise AssertionError("ambiguous masked account was accepted")
+
+
+def test_account_mapping_normalizes_formatting_and_supports_generic_masks():
+    db = _account_db("12345-0000-67890")
+    assert gmail_ingestion._account_for_alert(db, "12345****67890").account_number == "12345-0000-67890"
+
+
 def test_gmail_sync_is_idempotent_and_classifies_same_day_alerts(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
-    account = Account(name="Nabil", institution="NABIL", account_type=AccountType.BANK, account_number="34108963")
+    account = Account(name="Nabil", institution="NABIL", account_type=AccountType.BANK, account_number="3410017508963")
     db.add(account)
     db.commit()
     connection = GmailConnection(user_id="user-1", email="user@example.com", encrypted_refresh_token="refresh", encrypted_access_token="access")
@@ -147,13 +188,14 @@ def test_gmail_sync_reads_nested_html_and_commits_one_transaction(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
-    account = Account(name="Nabil", institution="NABIL", account_type=AccountType.BANK, account_number="34108963")
+    account = Account(name="Nabil", institution="NABIL", account_type=AccountType.BANK, account_number="3410017508963")
     db.add(account)
     db.commit()
     connection = GmailConnection(user_id="user-3", email="user@example.com", encrypted_refresh_token="refresh")
     db.add(connection)
     db.commit()
     html_body = """
+    <p>Please find transaction details for your account number 341#####08963 as below:</p>
     <table>
       <tr><th>Transaction Date</th><th>Transaction Type</th><th>Transaction Amount</th><th>Available Balance</th><th>Remarks</th></tr>
       <tr><td>2026-09-11 12:40</td><td>Debit</td><td>25.00</td><td>369,659.96</td><td>NQR-7969339,sandwich-Sandwich Hub NQR-7969339,san</td></tr>
