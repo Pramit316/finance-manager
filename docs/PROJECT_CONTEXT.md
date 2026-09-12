@@ -99,6 +99,24 @@ transactions, matched statement transactions, and the encrypted Gmail OAuth
 connection, then starts a fresh sync using the cross-source matcher.
 
 The standard editable category options include `Lunch`, `Home Expense`, and `Petrol / Gas`.
+
+Dashboard drill-downs use the server-side `/api/analytics/drilldown` endpoint.
+Summary cards, spending categories, and account rows pass the same active
+dashboard filters and return explainable aggregate statistics plus the
+contributing transactions. Balance drill-downs reuse latest `balance_after`
+per-account logic rather than summing transactions. Monthly trend is collapsed
+by default and can be expanded on demand.
+The drill-down view is rendered through a `document.body` portal with a
+viewport-level backdrop, Escape/backdrop close behavior, and body scroll lock;
+only the modal body scrolls when its content exceeds the viewport.
+
+Dashboard custom date filters support AD and Bikram Sambat display/input modes
+through the frontend `dateUtils.ts` wrapper around `nepali-date-converter`.
+Selected BS dates are converted immediately to local Gregorian `YYYY-MM-DD`
+values before being sent to the existing analytics and transaction APIs; no
+database or backend date representation changes are required.
+The dashboard also provides a `This Nepali Month` preset, whose BS month
+boundaries are converted to the corresponding Gregorian range before filtering.
 They are exposed alongside categories already used by stored transactions.
 
 Gmail conversation threads are not ingestion units. The sync uses

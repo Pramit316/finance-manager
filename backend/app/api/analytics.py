@@ -19,6 +19,7 @@ from app.schemas.analytics import (
     UnknownCountResponse,
     DistinctCategoriesResponse,
 )
+from app.schemas.transaction import TransactionResponse
 from app.services import analytics
 
 router = APIRouter()
@@ -249,4 +250,34 @@ def get_period_comparison(
         db, date_from=date_from, date_to=date_to, account_id=account_id,
         source=source, transaction_kind=transaction_kind, category=category,
     )
+
+
+@router.get("/plan-comparison")
+def get_plan_comparison(
+    date_from: Optional[date] = Query(None), date_to: Optional[date] = Query(None),
+    account_id: Optional[uuid.UUID] = Query(None), source: Optional[str] = Query(None),
+    transaction_kind: Optional[str] = Query(None), category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return analytics.get_plan_comparison(
+        db, date_from=date_from, date_to=date_to, account_id=account_id,
+        source=source, transaction_kind=transaction_kind, category=category,
+    )
+
+
+@router.get("/drilldown")
+def get_dashboard_drilldown(
+    metric: str = Query(...), date_from: Optional[date] = Query(None), date_to: Optional[date] = Query(None),
+    account_id: Optional[uuid.UUID] = Query(None), source: Optional[str] = Query(None),
+    transaction_kind: Optional[str] = Query(None), category: Optional[str] = Query(None),
+    drilldown_category: Optional[str] = Query(None), drilldown_account_id: Optional[uuid.UUID] = Query(None),
+    db: Session = Depends(get_db),
+):
+    result = analytics.get_dashboard_drilldown(
+        db, metric, date_from=date_from, date_to=date_to, account_id=account_id,
+        source=source, transaction_kind=transaction_kind, category=category,
+        drilldown_category=drilldown_category, drilldown_account_id=drilldown_account_id,
+    )
+    result["transactions"] = [TransactionResponse.model_validate(transaction) for transaction in result["transactions"]]
+    return result
 

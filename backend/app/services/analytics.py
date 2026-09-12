@@ -129,7 +129,6 @@ def get_analytics_summary(db: Session, **filters) -> dict:
     Both sides of a transfer cancel out (counted separately).
     """
     q = _base_filtered_query(db, **filters)
-
     row = q.with_entities(
         # Income: positive amounts that are NOT internal transfers
         func.coalesce(
@@ -543,6 +542,93 @@ def get_budget_comparison(db: Session, year: int, month: int, **filters) -> dict
     }
 
 
+def get_plan_comparison(db: Session, *, date_from: date | None = None, date_to: date | None = None, **filters) -> dict:
+    """Aggregate saved monthly plans and actual spending for a selected range."""
+    from calendar import monthrange
+
+    today = date.today()
+    selected_from = date_from or date(today.year, today.month, 1)
+    selected_to = date_to or date(today.year, today.month, monthrange(today.year, today.month)[1])
+    if selected_to < selected_from:
+        return {"available": False, "reason": "Invalid date range", "months": [], "categories": []}
+
+    month_keys = []
+    cursor = date(selected_from.year, selected_from.month, 1)
+    end_month = date(selected_to.year, selected_to.month, 1)
+    while cursor <= end_month:
+        month_keys.append((cursor.year, cursor.month))
+        cursor = date(cursor.year + (1 if cursor.month == 12 else 0), 1 if cursor.month == 12 else cursor.month + 1, 1)
+
+    budgets = db.query(MonthlyBudget).filter(
+        MonthlyBudget.year.in_([year for year, _ in month_keys]),
+        MonthlyBudget.month.in_([month for _, month in month_keys]),
+    ).all()
+    budgets = [budget for budget in budgets if (budget.year, budget.month) in month_keys]
+    if not budgets:
+        return {"available": False, "reason": "No saved plan for selected period", "months": month_keys, "categories": []}
+
+    allocation_by_category: dict[str, dict] = {}
+    expected_income = Decimal("0")
+    planned_saving = Decimal("0")
+    planned_consumption = Decimal("0")
+    planned_investment = Decimal("0")
+    for budget in budgets:
+        expected_income += budget.expected_income
+        planned_saving += budget.planned_saving or Decimal("0")
+        for allocation in budget.allocations:
+            key = allocation.category.casefold()
+            item = allocation_by_category.setdefault(key, {"category": allocation.category, "planned": Decimal("0"), "allocation_type": allocation.allocation_type.value})
+            item["planned"] += allocation.planned_amount
+            if allocation.allocation_type == AllocationType.INVESTMENT:
+                planned_investment += allocation.planned_amount
+            else:
+                planned_consumption += allocation.planned_amount
+    if not any(budget.planned_saving is not None for budget in budgets):
+        planned_saving = expected_income - planned_consumption - planned_investment
+
+    transactions = _base_filtered_query(
+        db, date_from=selected_from,
+        date_to=selected_to, **filters,
+    ).all()
+    spending = [transaction for transaction in transactions if transaction.transaction_kind in _SPENDING_KINDS and transaction.amount < 0 and transaction.is_internal_transfer is not True]
+    actual_income = sum((transaction.amount for transaction in transactions if transaction.transaction_kind == TransactionKind.INCOME and transaction.amount > 0 and transaction.is_internal_transfer is not True), Decimal("0"))
+    actual_by_category: dict[str, Decimal] = {}
+    for transaction in spending:
+        key = (transaction.category or "Uncategorized")
+        normalized = key.casefold()
+        actual_by_category[normalized] = actual_by_category.get(normalized, Decimal("0")) + abs(transaction.amount)
+
+    actual_spending = sum(actual_by_category.values(), Decimal("0"))
+    actual_investment = sum((amount for key, amount in actual_by_category.items() if allocation_by_category.get(key, {}).get("allocation_type") == AllocationType.INVESTMENT.value), Decimal("0"))
+    actual_consumption = actual_spending - actual_investment
+    categories = []
+    for key in sorted(set(allocation_by_category) | set(actual_by_category)):
+        planned_item = allocation_by_category.get(key, {"category": key.title(), "planned": Decimal("0"), "allocation_type": AllocationType.CONSUMPTION.value})
+        planned = planned_item["planned"]
+        actual = actual_by_category.get(key, Decimal("0"))
+        difference = planned - actual
+        utilization = float(actual / planned * 100) if planned else None
+        status = "UNPLANNED" if not planned and actual else "NO_SPENDING" if planned and not actual else "OVER_BUDGET" if actual > planned else "NEAR_LIMIT" if planned and actual >= planned * Decimal("0.8") else "ON_TRACK"
+        categories.append({"category": planned_item["category"], "planned": planned, "actual": actual, "difference": difference, "utilization": utilization, "status": status, "allocation_type": planned_item["allocation_type"]})
+
+    unplanned = sum((item["actual"] for item in categories if item["status"] == "UNPLANNED"), Decimal("0"))
+    uncategorized = actual_by_category.get("uncategorized", Decimal("0"))
+    return {
+        "available": True, "period_from": selected_from, "period_to": selected_to,
+        "months": month_keys, "months_with_plans": [(budget.year, budget.month) for budget in budgets],
+        "expected_income": expected_income, "actual_income": actual_income,
+        "planned_spending": planned_consumption, "actual_spending": actual_spending,
+        "planned_consumption": planned_consumption, "actual_consumption": actual_consumption,
+        "planned_investment": planned_investment, "actual_investment": actual_investment,
+        "planned_saving": planned_saving, "actual_remaining": actual_income - actual_spending,
+        "planned_remaining": expected_income - planned_consumption - planned_investment,
+        "difference": planned_consumption + planned_investment - actual_spending,
+        "budget_utilization": float(actual_spending / (planned_consumption + planned_investment) * 100) if planned_consumption + planned_investment else None,
+        "unplanned_spending": unplanned, "uncategorized_spending": uncategorized,
+        "categories": categories,
+    }
+
+
 def get_period_comparison(db: Session, *, date_from: date | None, date_to: date | None, **filters) -> dict:
     """Compare the selected date window with the immediately preceding equivalent window."""
     if not date_from or not date_to or date_to < date_from:
@@ -578,4 +664,54 @@ def get_period_comparison(db: Session, *, date_from: date | None, date_to: date 
         "current": current,
         "previous": previous,
         "category_changes": category_changes,
+    }
+
+
+def get_dashboard_drilldown(db: Session, metric: str, **filters) -> dict:
+    """Return explainable metrics and transactions for a dashboard selection."""
+    allowed = {"spending", "income", "transfers", "balance", "category", "account"}
+    if metric not in allowed:
+        raise ValueError("Unsupported dashboard metric")
+
+    category = filters.pop("drilldown_category", None)
+    drilldown_account = filters.pop("drilldown_account_id", None)
+    q = _base_filtered_query(db, **filters)
+    if metric == "balance":
+        accounts = get_latest_account_balances(
+            db, account_id=filters.get("account_id"), source=filters.get("source"), date_to=filters.get("date_to"),
+        )
+        return {"metric": metric, "total": sum((item["latest_balance"] or Decimal("0") for item in accounts), Decimal("0")), "count": len(accounts), "average": None, "largest": None, "average_daily": None, "categories": [], "accounts": accounts, "transactions": []}
+
+    if metric == "spending" or metric == "category":
+        q = q.filter(Transaction.transaction_kind.in_(_SPENDING_KINDS), Transaction.amount < 0, Transaction.is_internal_transfer.isnot(True))
+    elif metric == "income":
+        q = q.filter(Transaction.transaction_kind == TransactionKind.INCOME, Transaction.amount > 0, Transaction.is_internal_transfer.isnot(True))
+    elif metric == "transfers":
+        q = q.filter((Transaction.transaction_kind == TransactionKind.INTERNAL_TRANSFER) | (Transaction.is_internal_transfer.is_(True)))
+    if category:
+        q = q.filter(func.coalesce(Transaction.category, "Uncategorized") == category)
+    if drilldown_account:
+        q = q.filter(Transaction.account_id == drilldown_account)
+
+    transactions = q.order_by(Transaction.transaction_date.desc(), Transaction.transaction_timestamp.desc().nulls_last()).limit(200).all()
+    all_transactions = q.order_by(None).all()
+    amounts = [abs(t.amount) if metric == "spending" else t.amount for t in all_transactions]
+    total = sum(amounts, Decimal("0"))
+    date_values = {t.transaction_date for t in all_transactions}
+    categories = []
+    if metric in {"spending", "category"}:
+        grouped: dict[str, Decimal] = {}
+        for transaction in all_transactions:
+            key = transaction.category or "Uncategorized"
+            grouped[key] = grouped.get(key, Decimal("0")) + abs(transaction.amount)
+        categories = [{"category": key, "amount": value, "percentage": float(value / total * 100) if total else 0.0} for key, value in sorted(grouped.items(), key=lambda item: item[1], reverse=True)]
+    return {
+        "metric": metric,
+        "total": total,
+        "count": len(all_transactions),
+        "average": total / len(all_transactions) if all_transactions else Decimal("0"),
+        "largest": max(amounts) if amounts else Decimal("0"),
+        "average_daily": total / len(date_values) if date_values else Decimal("0"),
+        "categories": categories,
+        "transactions": transactions,
     }

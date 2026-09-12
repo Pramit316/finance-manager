@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { TrendingUp, TrendingDown, DollarSign, ArrowLeftRight, AlertCircle, Filter, Check, X } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import { Link } from 'react-router-dom';
 import { API } from '../config';
 import { authFetch } from '../lib/api';
+import { bsInputValue, bsToAd, currentBsMonthRange, formatDualDate } from '../lib/dateUtils';
 
 const COLORS = ['#4f8ef7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#6b7280'];
 
@@ -45,10 +47,15 @@ export const Dashboard: React.FC = () => {
   const [unknownCount, setUnknownCount] = useState(0);
   const [dbCategories, setDbCategories] = useState<string[]>([]);
   const [budget, setBudget] = useState<any>(null);
+  const [planComparison, setPlanComparison] = useState<any>(null);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
   const [comparison, setComparison] = useState<any>(null);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [categoryDraft, setCategoryDraft] = useState('');
   const [savingCategory, setSavingCategory] = useState<string | null>(null);
+  const [drilldown, setDrilldown] = useState<any>(null);
+  const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [trendExpanded, setTrendExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
@@ -58,6 +65,9 @@ export const Dashboard: React.FC = () => {
   const [source, setSource] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [calendarMode, setCalendarMode] = useState<'AD' | 'BS'>('AD');
+  const [bsFromInput, setBsFromInput] = useState('');
+  const [bsToInput, setBsToInput] = useState('');
   const [activePreset, setActivePreset] = useState('all');
   const [kindFilter, setKindFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -87,7 +97,7 @@ export const Dashboard: React.FC = () => {
 
       const [
         summaryRes, spendCatRes, incCatRes, spendAccRes, 
-        trendRes, unkRes, accsRes, balanceAccsRes, recentRes, catsRes, comparisonRes, budgetRes
+        trendRes, unkRes, accsRes, balanceAccsRes, recentRes, catsRes, comparisonRes, budgetRes, planRes
       ] = await Promise.all([
         authFetch(`${API}/api/analytics/summary${q}`),
         authFetch(`${API}/api/analytics/categories${q}`),
@@ -101,6 +111,7 @@ export const Dashboard: React.FC = () => {
         authFetch(`${API}/api/analytics/distinct-categories`),
         authFetch(`${API}/api/analytics/comparison${q}`),
         authFetch(`${API}/api/analytics/budget?${budgetParams.toString()}`),
+        authFetch(`${API}/api/analytics/plan-comparison${q}`),
       ]);
 
       if (!summaryRes.ok) throw new Error(`Summary: ${summaryRes.status}`);
@@ -119,6 +130,7 @@ export const Dashboard: React.FC = () => {
       setDbCategories((await catsRes.json()).categories || []);
       setBudget(budgetRes.ok ? await budgetRes.json() : null);
       setComparison(comparisonRes.ok ? await comparisonRes.json() : null);
+      setPlanComparison(planRes.ok ? await planRes.json() : null);
       
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard');
@@ -137,6 +149,7 @@ export const Dashboard: React.FC = () => {
       if (!response.ok) throw new Error((await response.json()).detail || 'Could not update category');
       const updated = await response.json();
       setRecent(current => current.map(txn => txn.id === transactionId ? { ...txn, category: updated.category } : txn));
+      setDrilldown((current: any) => current ? { ...current, transactions: current.transactions.map((txn: any) => txn.id === transactionId ? { ...txn, category: updated.category } : txn) } : current);
       setEditingCategory(null);
       await fetchAll();
     } catch (err: any) {
@@ -146,9 +159,51 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const openDrilldown = async (metric: string, extra: Record<string, string> = {}) => {
+    setDrilldownLoading(true);
+    try {
+      const drillParams = new URLSearchParams(paramsForFilters());
+      drillParams.set('metric', metric);
+      Object.entries(extra).forEach(([key, value]) => drillParams.set(key, value));
+      const response = await authFetch(`${API}/api/analytics/drilldown?${drillParams.toString()}`);
+      if (!response.ok) throw new Error('Could not load dashboard detail');
+      setDrilldown(await response.json());
+    } catch (err: any) { setError(err.message); }
+    finally { setDrilldownLoading(false); }
+  };
+
+  const paramsForFilters = () => {
+    const params = new URLSearchParams();
+    if (accountId) params.set('account_id', accountId);
+    if (source) params.set('source', source);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    if (kindFilter) params.set('transaction_kind', kindFilter);
+    if (categoryFilter) params.set('category', categoryFilter);
+    return params;
+  };
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  useEffect(() => {
+    if (!drilldown) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDrilldown(null);
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [drilldown]);
+
   const totalBalance = balanceAccounts.reduce((total, account) => total + parseFloat(account.latest_balance ?? 0), 0);
+  const categoryChartData = spendingCats.map(category => ({
+    ...category,
+    amount: Number(category.amount) || 0,
+  }));
   
   const toDateInput = (date: Date) => {
     const year = date.getFullYear();
@@ -178,6 +233,10 @@ export const Dashboard: React.FC = () => {
         const first = new Date(today.getFullYear(), today.getMonth(), 1);
         setDateFrom(toDateInput(first));
         setDateTo(todayValue);
+    } else if (preset === 'bsmonth') {
+      const range = currentBsMonthRange(today);
+      setDateFrom(range.from);
+      setDateTo(range.to);
     } else if (preset === 'lastmonth') {
         const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
         const last = new Date(today.getFullYear(), today.getMonth(), 0);
@@ -191,9 +250,41 @@ export const Dashboard: React.FC = () => {
   };
 
   const datePresets = [
-    ['all', 'All Time'], ['today', 'Today'], ['7days', 'Last 7 Days'], ['30days', 'Last 30 Days'],
+    ['all', 'All Time'], ['today', 'Today'], ['7days', 'Last 7 Days'], ['30days', 'Last 30 Days'], ['bsmonth', 'This Nepali Month'],
     ['month', 'This Month'], ['lastmonth', 'Last Month'], ['year', 'This Year'], ['custom', 'Custom Range'],
   ];
+
+  const switchCalendarMode = (mode: 'AD' | 'BS') => {
+    setCalendarMode(mode);
+    if (mode === 'BS') {
+      setBsFromInput(dateFrom ? bsInputValue(dateFrom) : '');
+      setBsToInput(dateTo ? bsInputValue(dateTo) : '');
+    }
+  };
+
+  const updateDateFrom = (value: string) => {
+    try {
+      if (calendarMode === 'BS') {
+        setBsFromInput(value);
+        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(value)) setDateFrom(bsToAd(value));
+      } else {
+        setDateFrom(value);
+      }
+      setActivePreset('custom');
+    } catch { }
+  };
+
+  const updateDateTo = (value: string) => {
+    try {
+      if (calendarMode === 'BS') {
+        setBsToInput(value);
+        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(value)) setDateTo(bsToAd(value));
+      } else {
+        setDateTo(value);
+      }
+      setActivePreset('custom');
+    } catch { }
+  };
 
   if (error) {
     return (
@@ -243,10 +334,33 @@ export const Dashboard: React.FC = () => {
           ))}
 
           {activePreset === 'custom' && (
-            <div className="date-range-fields">
-              <label>Start Date<input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setActivePreset('custom'); }} /></label>
-              <span className="date-range-separator">to</span>
-              <label>End Date<input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => { setDateTo(e.target.value); setActivePreset('custom'); }} /></label>
+            <div className="hybrid-date-picker">
+              <div className="calendar-mode-toggle" role="group" aria-label="Calendar input mode">
+                <button className={calendarMode === 'AD' ? 'active' : ''} onClick={() => switchCalendarMode('AD')}>AD</button>
+                <button className={calendarMode === 'BS' ? 'active' : ''} onClick={() => switchCalendarMode('BS')}>BS</button>
+              </div>
+              <div className="date-range-fields">
+                <label>Start Date
+                  <input
+                    type={calendarMode === 'AD' ? 'date' : 'text'}
+                    placeholder={calendarMode === 'BS' ? 'YYYY-MM-DD' : undefined}
+                    value={calendarMode === 'AD' ? dateFrom : bsFromInput}
+                    onChange={e => updateDateFrom(e.target.value)}
+                  />
+                  {dateFrom && <small>{formatDualDate(dateFrom)}</small>}
+                </label>
+                <span className="date-range-separator">to</span>
+                <label>End Date
+                  <input
+                    type={calendarMode === 'AD' ? 'date' : 'text'}
+                    placeholder={calendarMode === 'BS' ? 'YYYY-MM-DD' : undefined}
+                    value={calendarMode === 'AD' ? dateTo : bsToInput}
+                    min={calendarMode === 'AD' ? (dateFrom || undefined) : undefined}
+                    onChange={e => updateDateTo(e.target.value)}
+                  />
+                  {dateTo && <small>{formatDualDate(dateTo)}</small>}
+                </label>
+              </div>
             </div>
           )}
           
@@ -296,7 +410,7 @@ export const Dashboard: React.FC = () => {
         <>
           {/* ── KPI Row ─────────────────────────────────────────────── */}
           <div className="kpi-grid">
-            <div className="kpi-card kpi-balance">
+            <button className="kpi-card kpi-balance dashboard-clickable" onClick={() => openDrilldown('balance')}>
               <div className="kpi-icon" style={{ background: 'rgba(79,142,247,0.15)' }}>
                 <DollarSign size={24} color="#4f8ef7" />
               </div>
@@ -304,9 +418,9 @@ export const Dashboard: React.FC = () => {
                 <div className="kpi-label">Total Balance</div>
                 <div className="kpi-value">{fmtNPR(totalBalance)}</div>
               </div>
-            </div>
+            </button>
 
-            <div className="kpi-card">
+            <button className="kpi-card dashboard-clickable" onClick={() => openDrilldown('income')}>
               <div className="kpi-icon" style={{ background: 'rgba(16,185,129,0.15)' }}>
                 <TrendingUp size={24} color="#10b981" />
               </div>
@@ -314,9 +428,9 @@ export const Dashboard: React.FC = () => {
                 <div className="kpi-label">Total Income</div>
                 <div className="kpi-value positive">{fmtNPR(summary?.total_income)}</div>
               </div>
-            </div>
+            </button>
 
-            <div className="kpi-card">
+            <button className="kpi-card dashboard-clickable" onClick={() => openDrilldown('spending')}>
               <div className="kpi-icon" style={{ background: 'rgba(239,68,68,0.15)' }}>
                 <TrendingDown size={24} color="#ef4444" />
               </div>
@@ -324,9 +438,9 @@ export const Dashboard: React.FC = () => {
                 <div className="kpi-label">Total Spending</div>
                 <div className="kpi-value negative">{fmtNPR(summary?.total_spending)}</div>
               </div>
-            </div>
+            </button>
 
-            <div className="kpi-card">
+            <button className="kpi-card dashboard-clickable" onClick={() => openDrilldown('transfers')}>
               <div className="kpi-icon" style={{ background: 'rgba(139,92,246,0.15)' }}>
                 <ArrowLeftRight size={24} color="#8b5cf6" />
               </div>
@@ -334,9 +448,9 @@ export const Dashboard: React.FC = () => {
                 <div className="kpi-label">Internal Transfers</div>
                 <div className="kpi-value" style={{ color: '#8b5cf6' }}>{fmtNPR(summary?.internal_transfers)}</div>
               </div>
-            </div>
+            </button>
 
-            <div className="kpi-card">
+            <button className="kpi-card dashboard-clickable" onClick={() => openDrilldown('spending')}>
               <div className="kpi-icon" style={{ background: parseFloat(summary?.net_cash_flow ?? 0) >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)' }}>
                 <DollarSign size={24} color={parseFloat(summary?.net_cash_flow ?? 0) >= 0 ? '#10b981' : '#ef4444'} />
               </div>
@@ -346,7 +460,7 @@ export const Dashboard: React.FC = () => {
                   {fmtNPR(summary?.net_cash_flow)}
                 </div>
               </div>
-            </div>
+            </button>
           </div>
 
           <div className="dashboard-analysis-grid">
@@ -385,11 +499,23 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
           )}
+
+          {planComparison?.available && (
+            <button className="card plan-summary-card dashboard-clickable" onClick={() => setPlanModalOpen(true)}>
+              <div className="section-kicker">PLAN VS ACTUAL</div>
+              <div className="plan-summary-grid">
+                <div><span>Planned</span><strong>{fmtNPR(Number(planComparison.planned_spending) + Number(planComparison.planned_investment))}</strong></div>
+                <div><span>Actual</span><strong>{fmtNPR(planComparison.actual_spending)}</strong></div>
+                <div><span>{Number(planComparison.difference) >= 0 ? 'Remaining' : 'Over budget'}</span><strong className={Number(planComparison.difference) >= 0 ? 'positive' : 'negative'}>{fmtNPR(Math.abs(planComparison.difference))}</strong></div>
+                <div><span>Used</span><strong>{planComparison.budget_utilization == null ? '—' : `${Number(planComparison.budget_utilization).toFixed(1)}%`}</strong></div>
+              </div>
+            </button>
+          )}
           
           {/* ── Monthly Trend ─────────────────────────────────────── */}
-          <div className="card">
-            <h3>Monthly Trend</h3>
-            <div style={{ height: 300, marginTop: '1.5rem', opacity: loading ? 0.5 : 1 }}>
+          <div className="card monthly-trend-card">
+            <button className="section-toggle" onClick={() => setTrendExpanded(value => !value)}><h3>Monthly Trend</h3><span>{trendExpanded ? 'Collapse' : 'Expand'}</span></button>
+            {trendExpanded && <div style={{ height: 260, marginTop: '1rem', opacity: loading ? 0.5 : 1 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlyTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -404,7 +530,7 @@ export const Dashboard: React.FC = () => {
                   <Bar dataKey="spending" name="Spending" fill="#ef4444" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
-            </div>
+            </div>}
           </div>
 
           {/* ── Analysis Row ─────────────────────────────────────── */}
@@ -417,16 +543,18 @@ export const Dashboard: React.FC = () => {
                 <>
                   <div className="category-chart">
                     <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={spendingCats} cx="50%" cy="50%" innerRadius={55} outerRadius={95}
-                          paddingAngle={3} dataKey="amount" nameKey="category">
-                          {spendingCats.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                        </Pie>
+                      <BarChart data={categoryChartData} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                        <XAxis type="number" hide />
+                        <YAxis type="category" dataKey="category" width={92} tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <Bar dataKey="amount" fill="#4f8ef7" radius={[0, 4, 4, 0]} barSize={18}>
+                          {categoryChartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Bar>
                         <RechartsTooltip
                           formatter={(v: any) => fmtNPR(v)}
                           contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13 }}
                         />
-                      </PieChart>
+                      </BarChart>
                     </ResponsiveContainer>
                   </div>
                   <div style={{ marginTop: '0.75rem' }}>
@@ -434,7 +562,7 @@ export const Dashboard: React.FC = () => {
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0', borderBottom: '1px solid var(--border)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div style={{ width: 10, height: 10, borderRadius: '50%', background: COLORS[i % COLORS.length] }} />
-                          <span style={{ fontSize: '0.85rem' }}>{cat.category}</span>
+                          <button className="category-drilldown-button" onClick={() => openDrilldown('category', { drilldown_category: cat.category })}>{cat.category}</button>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <span style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block' }}>{fmtNPR(cat.amount)}</span>
@@ -491,7 +619,7 @@ export const Dashboard: React.FC = () => {
                       <div style={{ marginTop: '1rem' }}>
                         {spendingByAcc.map((acc, i) => (
                           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0', borderBottom: '1px solid var(--border)' }}>
-                            <span style={{ fontSize: '0.85rem' }}>{acc.account_name} ({acc.institution})</span>
+                            <button className="category-drilldown-button" onClick={() => openDrilldown('account', { drilldown_account_id: acc.account_id })}>{acc.account_name} ({acc.institution})</button>
                             <div style={{ textAlign: 'right' }}>
                               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ef4444', display: 'block' }}>{fmtNPR(acc.amount)}</span>
                               <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{acc.percentage}%</span>
@@ -561,7 +689,7 @@ export const Dashboard: React.FC = () => {
                   <h3>Account Balances</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
                     {accounts.length > 0 ? accounts.map(acc => (
-                      <div key={acc.account_id} className="account-row">
+                      <button key={acc.account_id} className="account-row account-drilldown-button" onClick={() => openDrilldown('account', { drilldown_account_id: acc.account_id })}>
                         <div>
                           <div className="acct-name">{acc.account_name}</div>
                           <div className="acct-inst">{acc.institution}</div>
@@ -570,7 +698,7 @@ export const Dashboard: React.FC = () => {
                           <div className="acct-balance">{fmtNPR(acc.latest_balance)}</div>
                           {acc.latest_balance_date && <div className="acct-date">as of {acc.latest_balance_date}</div>}
                         </div>
-                      </div>
+                      </button>
                     )) : (
                       <div style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem' }}>No accounts found.</div>
                     )}
@@ -597,6 +725,85 @@ export const Dashboard: React.FC = () => {
           </div>
         </>
       )}
+      {drilldown && createPortal((
+        <div className="modal-backdrop" onClick={() => setDrilldown(null)}>
+          <section className="card dashboard-drilldown" onClick={event => event.stopPropagation()}>
+            <div className="drilldown-header">
+              <div><div className="section-kicker">FILTERED DETAIL</div><h2>{drilldown.metric === 'spending' ? 'Total Spending' : drilldown.metric === 'income' ? 'Total Income' : drilldown.metric === 'transfers' ? 'Internal Transfers' : drilldown.metric === 'category' ? 'Category Spending' : 'Account Detail'}</h2></div>
+              <button className="icon-btn" title="Close detail" onClick={() => setDrilldown(null)}><X size={18} /></button>
+            </div>
+            {drilldownLoading ? <div className="table-loading"><div className="loader" /></div> : <>
+              <div className="drilldown-stat-grid">
+                <div><span>Total</span><strong>{fmtNPR(drilldown.total)}</strong></div>
+                <div><span>Transactions</span><strong>{drilldown.count}</strong></div>
+                <div><span>Average</span><strong>{fmtNPR(drilldown.average)}</strong></div>
+                <div><span>Largest</span><strong>{fmtNPR(drilldown.largest)}</strong></div>
+                <div><span>Average / day</span><strong>{fmtNPR(drilldown.average_daily)}</strong></div>
+              </div>
+              {drilldown.accounts?.length > 0 && <div className="drilldown-category-list">
+                {drilldown.accounts.map((account: any) => <div key={account.account_id}><span>{account.account_name} ({account.institution})</span><strong>{fmtNPR(account.latest_balance)}</strong></div>)}
+              </div>}
+              {comparison?.available && ['spending', 'income'].includes(drilldown.metric) && <p className="page-subtitle">Previous equivalent period: {fmtNPR(drilldown.metric === 'spending' ? comparison.previous.total_spending : comparison.previous.total_income)}. Change: {fmtNPR((drilldown.metric === 'spending' ? comparison.current.total_spending - comparison.previous.total_spending : comparison.current.total_income - comparison.previous.total_income))}</p>}
+              {drilldown.categories?.length > 0 && <div className="drilldown-category-list">
+                {drilldown.categories.map((item: any) => <div key={item.category}><span>{item.category}</span><strong>{fmtNPR(item.amount)} <small>{item.percentage.toFixed(1)}%</small></strong></div>)}
+              </div>}
+              <h3 className="drilldown-transactions-title">Which transactions created this number?</h3>
+              <div className="drilldown-transactions">
+                {drilldown.transactions?.map((transaction: any) => (
+                  <div key={transaction.id} className="drilldown-transaction-row">
+                    <span>{transaction.transaction_date}</span><span className="drilldown-description">{transaction.description_raw}</span><strong className={parseFloat(transaction.amount) >= 0 ? 'positive' : 'negative'}>{fmtNPR(transaction.amount)}</strong>
+                    <select value={transaction.category || ''} onChange={event => { setCategoryDraft(event.target.value); setEditingCategory(transaction.id); }} className="inline-category-select">
+                      <option value="">Uncategorized</option>{dbCategories.map(category => <option key={category} value={category}>{category}</option>)}
+                    </select>
+                    {editingCategory === transaction.id && <button className="icon-btn success" title="Save category" disabled={savingCategory === transaction.id} onClick={() => updateCategory(transaction.id)}><Check size={14} /></button>}
+                  </div>
+                ))}
+              </div>
+            </>}
+          </section>
+        </div>
+      ), document.body)}
+      {planModalOpen && planComparison && createPortal((
+        <div className="modal-backdrop" onClick={() => setPlanModalOpen(false)}>
+          <section className="card dashboard-drilldown plan-analysis-modal" onClick={event => event.stopPropagation()}>
+            <div className="drilldown-header">
+              <div><div className="section-kicker">PLAN VS ACTUAL</div><h2>{planComparison.period_from} to {planComparison.period_to}</h2></div>
+              <button className="icon-btn" title="Close plan analysis" onClick={() => setPlanModalOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="drilldown-stat-grid">
+              <div><span>Expected income</span><strong>{fmtNPR(planComparison.expected_income)}</strong></div>
+              <div><span>Planned spending</span><strong>{fmtNPR(planComparison.planned_spending)}</strong></div>
+              <div><span>Actual spending</span><strong>{fmtNPR(planComparison.actual_spending)}</strong></div>
+              <div><span>Planned investment</span><strong>{fmtNPR(planComparison.planned_investment)}</strong></div>
+              <div><span>Actual investment</span><strong>{fmtNPR(planComparison.actual_investment)}</strong></div>
+              <div><span>Planned saving</span><strong>{fmtNPR(planComparison.planned_saving)}</strong></div>
+              <div><span>Actual remaining</span><strong>{fmtNPR(planComparison.actual_remaining)}</strong></div>
+              <div><span>Unplanned spending</span><strong className="negative">{fmtNPR(planComparison.unplanned_spending)}</strong></div>
+              <div><span>Uncategorized</span><strong>{fmtNPR(planComparison.uncategorized_spending)}</strong></div>
+              <div><span>Plan used</span><strong>{planComparison.budget_utilization == null ? '—' : `${Number(planComparison.budget_utilization).toFixed(1)}%`}</strong></div>
+            </div>
+            <div className="plan-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={planComparison.categories} layout="vertical" margin={{ left: 10, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                  <XAxis type="number" hide /><YAxis type="category" dataKey="category" width={100} tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+                  <RechartsTooltip formatter={(value: any) => fmtNPR(value)} /><Legend />
+                  <Bar dataKey="planned" name="Planned" fill="#4f8ef7" barSize={10} />
+                  <Bar dataKey="actual" name="Actual" fill="#ef4444" barSize={10} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="plan-category-breakdown">
+              {planComparison.categories.map((item: any) => (
+                <button key={item.category} className="plan-category-row" onClick={() => openDrilldown('category', { drilldown_category: item.category })}>
+                  <span><strong>{item.category}</strong><small>{item.status === 'UNPLANNED' ? 'Unplanned spending' : item.status === 'OVER_BUDGET' ? 'Over budget' : item.status === 'NO_SPENDING' ? 'No spending yet' : item.status === 'NEAR_LIMIT' ? 'Near limit' : 'On track'}</small></span>
+                  <span>{fmtNPR(item.planned)} planned · {fmtNPR(item.actual)} actual · {item.utilization == null ? '—' : `${Number(item.utilization).toFixed(1)}%`}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      ), document.body)}
     </div>
   );
 };

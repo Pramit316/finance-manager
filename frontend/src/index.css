@@ -196,7 +196,7 @@ a:hover { text-decoration: underline; }
 .form-group { margin-bottom: 1.25rem; }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; }
-.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 1rem; background: rgba(4, 8, 16, 0.76); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 1rem; background: rgba(4, 8, 16, 0.78); backdrop-filter: blur(5px); }
 .modal { width: min(720px, 100%); max-height: 92vh; overflow-y: auto; }
 
 label {
@@ -360,6 +360,11 @@ select option { background: var(--bg-secondary); }
   cursor: pointer;
 }
 .filter-select:focus { outline: none; border-color: var(--accent-primary); }
+.hybrid-date-picker { display: flex; flex-direction: column; gap: 0.45rem; }
+.calendar-mode-toggle { display: inline-flex; align-self: flex-start; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); }
+.calendar-mode-toggle button { border: 0; border-radius: 4px; padding: 0.22rem 0.55rem; background: transparent; color: var(--text-secondary); font-size: 0.7rem; font-weight: 700; cursor: pointer; }
+.calendar-mode-toggle button.active { background: var(--accent-primary); color: #fff; }
+.date-range-fields label small { display: block; margin-top: 0.2rem; color: var(--text-secondary); font-size: 0.68rem; white-space: nowrap; }
 
 .search-wrap {
   position: relative;
@@ -572,6 +577,8 @@ select option { background: var(--bg-secondary); }
   transition: box-shadow 0.2s, border-color 0.2s;
 }
 .kpi-card:hover { border-color: var(--border-light); box-shadow: 0 0 0 1px var(--border-light); }
+.dashboard-clickable { width: 100%; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.dashboard-clickable:hover { transform: translateY(-2px); }
 
 .kpi-icon {
   width: 48px;
@@ -607,8 +614,39 @@ select option { background: var(--bg-secondary); }
 .category-edit-trigger:hover { text-decoration: underline; }
 .inline-category-select { width: auto; min-width: 130px; padding: 0.25rem 0.4rem; font-size: 0.75rem; }
 .dashboard-category-editor .icon-btn { width: 24px; height: 24px; }
+.category-drilldown-button { border: 0; background: transparent; color: var(--text-primary); cursor: pointer; font: inherit; text-align: left; }
+.category-drilldown-button:hover { color: var(--accent-primary); text-decoration: underline; }
+.account-drilldown-button { width: 100%; border: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.account-drilldown-button:hover { background: rgba(79,142,247,0.08); }
+.monthly-trend-card { margin-top: 0.25rem; }
+.section-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.section-toggle span { color: var(--accent-primary); font-size: 0.8rem; }
+.dashboard-drilldown { width: min(980px, 94vw); max-height: 90vh; overflow-y: auto; overscroll-behavior: contain; background: var(--bg-secondary); }
+.plan-summary-card { width: 100%; color: inherit; text-align: left; cursor: pointer; }
+.plan-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 0.65rem; }
+.plan-summary-grid span, .plan-category-row small { display: block; color: var(--text-secondary); font-size: 0.75rem; }
+.plan-summary-grid strong { display: block; margin-top: 0.25rem; font-size: 1.1rem; }
+.plan-chart { height: 300px; margin: 1rem 0 1.25rem; }
+.plan-category-breakdown { display: grid; gap: 0.4rem; }
+.plan-category-row { display: flex; justify-content: space-between; gap: 1rem; width: 100%; padding: 0.65rem 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; font: inherit; }
+.plan-category-row:hover { color: var(--accent-primary); }
+.plan-category-row > span:last-child { color: var(--text-secondary); font-size: 0.8rem; text-align: right; }
+.drilldown-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.drilldown-stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; margin: 1.25rem 0; }
+.drilldown-stat-grid div { padding: 0.75rem; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.drilldown-stat-grid span { display: block; color: var(--text-secondary); font-size: 0.72rem; }
+.drilldown-stat-grid strong { display: block; margin-top: 0.25rem; font-size: 0.95rem; }
+.drilldown-category-list { display: grid; gap: 0.35rem; margin-bottom: 1.25rem; }
+.drilldown-category-list > div { display: flex; justify-content: space-between; padding: 0.45rem 0; border-bottom: 1px solid var(--border); font-size: 0.84rem; }
+.drilldown-category-list small { color: var(--text-secondary); font-weight: 400; }
+.drilldown-transactions-title { margin-top: 1.25rem; }
+.drilldown-transactions { display: grid; gap: 0.35rem; }
+.drilldown-transaction-row { display: grid; grid-template-columns: 95px minmax(0, 1fr) auto 150px auto; gap: 0.6rem; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+.drilldown-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 900px) { .dashboard-analysis-grid { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .money-flow-path { align-items: flex-start; flex-direction: column; } .flow-arrow { transform: rotate(90deg); } .comparison-stats { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .drilldown-stat-grid { grid-template-columns: repeat(2, 1fr); } .drilldown-transaction-row { grid-template-columns: 90px minmax(0, 1fr) auto; } .drilldown-transaction-row .inline-category-select { grid-column: 2; } }
+@media (max-width: 560px) { .money-flow-path { align-items: flex-start; flex-direction: column; } .flow-arrow { transform: rotate(90deg); } .comparison-stats { grid-template-columns: 1fr; } .drilldown-stat-grid { grid-template-columns: 1fr; } .drilldown-transaction-row { grid-template-columns: 1fr auto; } .drilldown-description { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .plan-summary-grid { grid-template-columns: repeat(2, 1fr); } .plan-category-row { flex-direction: column; } .plan-category-row > span:last-child { text-align: left; } }
 
 .recent-txns-list { display: flex; flex-direction: column; }
 .recent-txn-row {

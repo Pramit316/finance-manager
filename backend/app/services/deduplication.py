@@ -118,7 +118,9 @@ def find_cross_source_match(db, txn: ParsedTransaction, account_id: str):
     are also identical.
     """
     signed_amount = txn.amount
-    normalized_account_id = uuid.UUID(account_id) if isinstance(account_id, str) else account_id
+    normalized_account_id = account_id
+    if isinstance(account_id, str):
+        normalized_account_id = uuid.UUID(account_id)
     base_query = db.query(Transaction).filter(
         Transaction.account_id == normalized_account_id,
         Transaction.source != "GMAIL_TRANSACTION_ALERT",
