@@ -88,14 +88,20 @@ def gmail_status(user: dict | None = Depends(verify_jwt), db: Session = Depends(
 
 
 @router.post("/sync")
-def gmail_sync(user: dict | None = Depends(verify_jwt), db: Session = Depends(get_db)):
+def gmail_sync(
+    backfill: bool = Query(False),
+    page_token: str | None = Query(None),
+    batch_size: int = Query(50, ge=1, le=50),
+    user: dict | None = Depends(verify_jwt),
+    db: Session = Depends(get_db),
+):
     user_id = _user_id(user)
     connection = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
     if not connection:
         raise HTTPException(status_code=409, detail="Gmail is not connected")
     try:
         logger.info("Starting Gmail sync for user %s", user_id)
-        return sync_nabil_alerts(db, connection)
+        return sync_nabil_alerts(db, connection, backfill=backfill, page_token=page_token, batch_size=batch_size)
     except Exception as exc:
         db.rollback()
         logger.warning("Gmail sync failed for user %s: %s", user_id, type(exc).__name__)

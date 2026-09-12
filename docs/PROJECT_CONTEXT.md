@@ -63,6 +63,27 @@ mask runs (`#`, `*`, or `x`) match the same number of digits, and the complete
 normalized account length must match. Multiple masked matches are rejected as
 ambiguous rather than guessed.
 
+Gmail sync keeps message-level and transaction-level deduplication separate:
+`IMPORTED` and `DUPLICATE` Gmail message records count as
+`emails_already_processed`, while only a matching canonical transaction hash
+counts as `transaction_duplicates`. Failed message records are retried rather
+than treated as already processed. Gmail fingerprints include account, full
+transaction timestamp, debit/credit direction, amount, balance, and remarks.
+
+Gmail sync is quota-efficient: normal runs request one page of at most 50
+message IDs using only `from:txn-alert@nabilbank.com`, check local
+`gmail_messages` before fetching any body, and fetch only new or retryable
+messages. Controlled historical backfill uses the same bounded page size and
+returns a `next_page_token`. Gmail 403 quota errors and 429 rate limits use
+exponential backoff; exhausted quota stops the current batch and reports
+`quota_deferred` without marking the sync successful.
+
+Gmail conversation threads are not ingestion units. The sync uses
+`users.messages.list` and fetches each returned `message.id` independently with
+`messages.get(format="full")`. Multiple messages sharing one Gmail `threadId`
+therefore receive separate parsing, message-status, duplicate checks, and
+transactions; `threadId` is never the primary deduplication key.
+
 ---
 
 # Core Product Flow

@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     FRONTEND_OAUTH_SUCCESS_URI: str = "http://localhost:5173/imports"
     GMAIL_TOKEN_ENCRYPTION_KEY: str = ""
     GMAIL_ALLOWED_SENDER: str = "txn-alert@nabilbank.com"
+    GMAIL_SYNC_BATCH_SIZE: int = 50
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
