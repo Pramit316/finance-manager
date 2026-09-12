@@ -39,6 +39,41 @@ class _BodyTextParser(HTMLParser):
         return "\n".join(self.parts)
 
 
+class _TableParser(HTMLParser):
+    """Collect normalized rows and cells without depending on visual layout."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell_parts: list[str] = []
+        self._in_cell = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell_parts = []
+            self._in_cell = True
+
+    def handle_data(self, data: str) -> None:
+        if self._in_cell:
+            self._cell_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"td", "th"} and self._in_cell and self._row is not None:
+            value = " ".join("".join(self._cell_parts).split())
+            self._row.append(html.unescape(value))
+            self._cell_parts = []
+            self._in_cell = False
+        elif tag == "tr" and self._row is not None:
+            if self._row:
+                self.rows.append(self._row)
+            self._row = None
+
+
 class NabilEmailParser:
     """Parse labelled Nabil alerts from HTML, with plain-text fallback."""
 
@@ -61,7 +96,14 @@ class NabilEmailParser:
     ) -> NabilEmailAlert:
         text = self._to_text(body) if is_html else body
         text = html.unescape(text)
-        values = {name: self._extract_value(text, label) for name, label in self._LABELS.items()}
+        values = self._extract_table_values(body) if is_html else None
+        if not values or not values.get("transaction_date"):
+            values = {name: self._extract_value(text, label) for name, label in self._LABELS.items()}
+        elif not values.get("account_number"):
+            account_match = re.search(
+                r"account\s+(?:number|no\.?)\s*:?[ \t]+([0-9#]+)", text, re.IGNORECASE,
+            )
+            values["account_number"] = account_match.group(1) if account_match else None
 
         timestamp = self._parse_datetime(self._required(values, "transaction_date"))
         transaction_type = self._required(values, "transaction_type").strip().lower()
@@ -90,6 +132,33 @@ class NabilEmailParser:
         parser = _BodyTextParser()
         parser.feed(body)
         return parser.text()
+
+    @classmethod
+    def _extract_table_values(cls, body: str) -> dict[str, str | None] | None:
+        parser = _TableParser()
+        parser.feed(body)
+        normalized_labels = {re.sub(r"[^a-z]", "", value.lower()): name for name, value in {
+            "transaction_date": "Transaction Date",
+            "transaction_type": "Transaction Type",
+            "transaction_amount": "Transaction Amount",
+            "available_balance": "Available Balance",
+            "remarks": "Remarks",
+            "account_number": "Account Number",
+        }.items()}
+
+        for index, row in enumerate(parser.rows):
+            row_keys = [normalized_labels.get(re.sub(r"[^a-z]", "", cell.lower())) for cell in row]
+            if all(key in row_keys for key in ("transaction_date", "transaction_type", "transaction_amount", "available_balance", "remarks")):
+                if index + 1 >= len(parser.rows):
+                    continue
+                values_row = parser.rows[index + 1]
+                values = {key: None for key in cls._LABELS}
+                for position, key in enumerate(row_keys):
+                    if key and position < len(values_row):
+                        values[key] = values_row[position]
+                return values
+
+        return None
 
     @classmethod
     def _extract_value(cls, text: str, label: str) -> str | None:

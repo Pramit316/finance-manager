@@ -42,6 +42,21 @@ Standard Chartered is now supported through a separate embedded-text PDF
 adapter. Its verified sample is a one-page five-column transaction table for
 25/07/2026 through 23/08/2026; see `docs/INGESTION.md` for the stable details.
 
+Gmail Nabil transaction-alert ingestion supports local development with
+`GOOGLE_REDIRECT_URI=http://localhost:8000/api/gmail/oauth/callback` while
+production keeps its Render callback in the Render environment. Gmail OAuth
+tokens are encrypted with the environment-specific `GMAIL_TOKEN_ENCRYPTION_KEY`
+and local sync uses the local PostgreSQL database. Gmail search is restricted to
+`from:txn-alert@nabilbank.com` by default; processed Gmail message IDs and
+transaction fingerprints make manual sync idempotent.
+
+Nabil Gmail alerts may be `multipart/alternative` or nested MIME messages
+with an HTML table whose header row is separate from its value row. The Gmail
+ingestion path requests `format=full`, prefers decoded `text/html`, falls back
+to `text/plain`, and maps the labeled table columns to the existing canonical
+transaction model. Surrounding masked account text is used for NABIL account
+mapping when it is outside the table.
+
 ---
 
 # Core Product Flow

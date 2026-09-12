@@ -3,8 +3,6 @@
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision: str = "c7d9e1f3a5b7"
 down_revision: Union[str, None] = "b6c8e0f4a2d1"
@@ -14,36 +12,33 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("ALTER TYPE statement_source_enum ADD VALUE IF NOT EXISTS 'GMAIL_TRANSACTION_ALERT'")
-    op.create_table(
-        "gmail_connections",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("user_id", sa.String(length=255), nullable=False),
-        sa.Column("email", sa.String(length=320), nullable=False),
-        sa.Column("encrypted_refresh_token", sa.Text(), nullable=False),
-        sa.Column("encrypted_access_token", sa.Text(), nullable=True),
-        sa.Column("token_expiry", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("last_successful_sync_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id"),
-    )
-    op.create_table(
-        "gmail_messages",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("connection_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("gmail_message_id", sa.String(length=255), nullable=False),
-        sa.Column("sender", sa.String(length=320), nullable=False),
-        sa.Column("status", sa.String(length=30), nullable=False),
-        sa.Column("failure_reason", sa.Text(), nullable=True),
-        sa.Column("transaction_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("processed_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["connection_id"], ["gmail_connections.id"]),
-        sa.ForeignKeyConstraint(["transaction_id"], ["transactions.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("connection_id", "gmail_message_id", name="uq_gmail_connection_message"),
-    )
-    op.create_index("ix_gmail_messages_message_id", "gmail_messages", ["gmail_message_id"])
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS gmail_connections (
+            id UUID NOT NULL PRIMARY KEY,
+            user_id VARCHAR(255) NOT NULL UNIQUE,
+            email VARCHAR(320) NOT NULL,
+            encrypted_refresh_token TEXT NOT NULL,
+            encrypted_access_token TEXT,
+            token_expiry TIMESTAMP WITH TIME ZONE,
+            last_successful_sync_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+        )
+    """)
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS gmail_messages (
+            id UUID NOT NULL PRIMARY KEY,
+            connection_id UUID NOT NULL REFERENCES gmail_connections(id),
+            gmail_message_id VARCHAR(255) NOT NULL,
+            sender VARCHAR(320) NOT NULL,
+            status VARCHAR(30) NOT NULL,
+            failure_reason TEXT,
+            transaction_id UUID REFERENCES transactions(id),
+            processed_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            CONSTRAINT uq_gmail_connection_message UNIQUE (connection_id, gmail_message_id)
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_gmail_messages_message_id ON gmail_messages (gmail_message_id)")
 
 
 def downgrade() -> None:

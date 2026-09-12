@@ -1,8 +1,9 @@
 """Authenticated manual Gmail connection and sync endpoints."""
 
 import html
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth import verify_jwt
@@ -14,6 +15,7 @@ from app.services.gmail_ingestion import sync_nabil_alerts
 from app.services.gmail_security import create_oauth_state, validate_oauth_state
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _user_id(payload: dict | None) -> str:
@@ -27,8 +29,11 @@ def _user_id(payload: dict | None) -> str:
 @router.get("/connect")
 def connect_gmail(user: dict | None = Depends(verify_jwt)):
     try:
-        return {"authorization_url": build_authorization_url(create_oauth_state(_user_id(user)))}
+        user_id = _user_id(user)
+        logger.info("Starting Gmail OAuth for user %s", user_id)
+        return {"authorization_url": build_authorization_url(create_oauth_state(user_id))}
     except RuntimeError as exc:
+        logger.warning("Gmail OAuth start failed: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc))
 
 
@@ -56,10 +61,14 @@ def gmail_oauth_callback(code: str = Query(...), state: str = Query(...), db: Se
             for key, value in values.items():
                 setattr(connection, key, value)
         db.commit()
+        logger.info("Gmail connection saved for user %s (%s)", user_id, email)
+        if settings.GOOGLE_REDIRECT_URI.startswith(("http://localhost:", "http://127.0.0.1:")):
+            return RedirectResponse(url=settings.FRONTEND_OAUTH_SUCCESS_URI, status_code=303)
         message = "Gmail connected. You can close this window."
         connected = True
     except Exception as exc:
         db.rollback()
+        logger.warning("Gmail OAuth callback failed: %s", type(exc).__name__)
         message = f"Gmail connection failed: {exc}"
     safe_message = html.escape(message)
     safe_connected = "true" if connected else "false"
@@ -80,21 +89,26 @@ def gmail_status(user: dict | None = Depends(verify_jwt), db: Session = Depends(
 
 @router.post("/sync")
 def gmail_sync(user: dict | None = Depends(verify_jwt), db: Session = Depends(get_db)):
-    connection = db.query(GmailConnection).filter(GmailConnection.user_id == _user_id(user)).first()
+    user_id = _user_id(user)
+    connection = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
     if not connection:
         raise HTTPException(status_code=409, detail="Gmail is not connected")
     try:
+        logger.info("Starting Gmail sync for user %s", user_id)
         return sync_nabil_alerts(db, connection)
     except Exception as exc:
         db.rollback()
+        logger.warning("Gmail sync failed for user %s: %s", user_id, type(exc).__name__)
         raise HTTPException(status_code=502, detail=f"Gmail sync failed: {exc}")
 
 
 @router.delete("/disconnect")
 def gmail_disconnect(user: dict | None = Depends(verify_jwt), db: Session = Depends(get_db)):
-    connection = db.query(GmailConnection).filter(GmailConnection.user_id == _user_id(user)).first()
+    user_id = _user_id(user)
+    connection = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
     if connection:
         db.query(GmailMessage).filter(GmailMessage.connection_id == connection.id).delete(synchronize_session=False)
         db.delete(connection)
         db.commit()
+        logger.info("Gmail connection disconnected for user %s", user_id)
     return {"connected": False}

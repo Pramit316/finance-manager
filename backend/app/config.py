@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""
+    FRONTEND_OAUTH_SUCCESS_URI: str = "http://localhost:5173/imports"
     GMAIL_TOKEN_ENCRYPTION_KEY: str = ""
     GMAIL_ALLOWED_SENDER: str = "txn-alert@nabilbank.com"
 

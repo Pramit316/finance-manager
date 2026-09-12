@@ -75,6 +75,24 @@ def _message(message_id, body, *, sender="txn-alert@nabilbank.com"):
     }
 
 
+def _html_message(message_id, html_body, plain_body, *, sender="txn-alert@nabilbank.com"):
+    return {
+        "id": message_id,
+        "internalDate": "1788698220000",
+        "payload": {
+            "mimeType": "multipart/alternative",
+            "headers": [{"name": "From", "value": sender}],
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": _encoded(plain_body)}},
+                {
+                    "mimeType": "multipart/related",
+                    "parts": [{"mimeType": "text/html", "body": {"data": _encoded(html_body)}}],
+                },
+            ],
+        },
+    }
+
+
 def test_gmail_sync_is_idempotent_and_classifies_same_day_alerts(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -123,3 +141,45 @@ def test_gmail_sync_records_unsupported_sender_as_failed(monkeypatch):
 
     assert result["failed"] == 1
     assert db.query(GmailMessage).one().status == "FAILED"
+
+
+def test_gmail_sync_reads_nested_html_and_commits_one_transaction(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    account = Account(name="Nabil", institution="NABIL", account_type=AccountType.BANK, account_number="34108963")
+    db.add(account)
+    db.commit()
+    connection = GmailConnection(user_id="user-3", email="user@example.com", encrypted_refresh_token="refresh")
+    db.add(connection)
+    db.commit()
+    html_body = """
+    <table>
+      <tr><th>Transaction Date</th><th>Transaction Type</th><th>Transaction Amount</th><th>Available Balance</th><th>Remarks</th></tr>
+      <tr><td>2026-09-11 12:40</td><td>Debit</td><td>25.00</td><td>369,659.96</td><td>NQR-7969339,sandwich-Sandwich Hub NQR-7969339,san</td></tr>
+    </table>
+    """
+    messages = {
+        "html-1": _html_message(
+            "html-1", html_body,
+            "Transaction Date: wrong fallback content",
+        ),
+    }
+    monkeypatch.setattr(gmail_ingestion, "gmail_service", lambda _: _Service(messages))
+
+    first = gmail_ingestion.sync_nabil_alerts(db, connection)
+    second = gmail_ingestion.sync_nabil_alerts(db, connection)
+
+    transaction = db.query(Transaction).one()
+    assert first["emails_found"] == 1
+    assert first["bodies_read"] == 1
+    assert first["parsed"] == 1
+    assert first["imported"] == 1
+    assert first["failed"] == 0
+    assert second["duplicates"] == 1
+    assert second["imported"] == 0
+    assert transaction.amount == Decimal("-25.00")
+    assert transaction.balance_after == Decimal("369659.96")
+    assert transaction.description_raw == "NQR-7969339,sandwich-Sandwich Hub NQR-7969339,san"
+    assert transaction.source_reference == "html-1"
+    assert db.query(GmailMessage).one().status == "IMPORTED"

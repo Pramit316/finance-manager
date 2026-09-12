@@ -17,6 +17,18 @@ HTML_ALERT = """
 </table></body></html>
 """
 
+REALISTIC_TABLE_ALERT = """
+<html><body>
+<p>Dear PRAMIT,<br>Greetings!</p>
+<p>Please find transaction details for your account number 341#####08963 as below:</p>
+<table>
+    <tr><th>Transaction Date</th><th>Transaction Type</th><th>Transaction Amount</th><th>Available Balance</th><th>Remarks</th></tr>
+    <tr><td>2026-09-11 12:40</td><td>Debit</td><td>25.00</td><td>369,659.96</td><td>NQR-7969339,<br>sandwich-Sandwich Hub NQR-7969339,san</td></tr>
+</table>
+<p>Contact Nabil support for assistance.</p>
+</body></html>
+"""
+
 
 PLAIN_ALERT = """Transaction Date: 2026-09-06 12:38
 Transaction Type: Debit
@@ -48,6 +60,21 @@ def test_plain_text_debit_is_negative_direction():
     assert alert.is_credit is False
     assert alert.amount == Decimal("1269.00")
     assert alert.remarks == "POS PUR/50009142/BHATBH ATEN"
+
+
+def test_parses_realistic_html_header_and_value_rows():
+    alert = NabilEmailParser().parse(
+        REALISTIC_TABLE_ALERT,
+        sender="txn-alert@nabilbank.com",
+        is_html=True,
+    )
+
+    assert alert.transaction_timestamp == datetime(2026, 9, 11, 12, 40, tzinfo=timezone.utc)
+    assert alert.is_credit is False
+    assert alert.amount == Decimal("25.00")
+    assert alert.balance_after == Decimal("369659.96")
+    assert alert.remarks == "NQR-7969339,sandwich-Sandwich Hub NQR-7969339,san"
+    assert alert.account_number == "341#####08963"
 
 
 def test_missing_required_value_is_rejected():
