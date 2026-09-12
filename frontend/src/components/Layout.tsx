@@ -9,6 +9,7 @@ export const Layout: React.FC = () => {
 
   return (
     <div className="app-layout">
+      <div className="bg-animation"></div>
       <aside className="sidebar">
         <div className="sidebar-header">
           <img className="logo-icon" src={logo} alt="FinTrack" />

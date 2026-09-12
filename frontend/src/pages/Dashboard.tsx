@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { API } from '../config';
 import { authFetch } from '../lib/api';
 import { bsInputValue, bsToAd, currentBsMonthRange, formatDualDate } from '../lib/dateUtils';
+import { AnimatedNumber } from '../components/AnimatedNumber';
 
 const COLORS = ['#4f8ef7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#6b7280'];
 
@@ -416,7 +417,7 @@ export const Dashboard: React.FC = () => {
               </div>
               <div>
                 <div className="kpi-label">Total Balance</div>
-                <div className="kpi-value">{fmtNPR(totalBalance)}</div>
+                <div className="kpi-value"><AnimatedNumber value={totalBalance} format={fmtNPR} /></div>
               </div>
             </button>
 
@@ -426,7 +427,7 @@ export const Dashboard: React.FC = () => {
               </div>
               <div>
                 <div className="kpi-label">Total Income</div>
-                <div className="kpi-value positive">{fmtNPR(summary?.total_income)}</div>
+                <div className="kpi-value positive"><AnimatedNumber value={summary?.total_income} format={fmtNPR} /></div>
               </div>
             </button>
 
@@ -436,7 +437,7 @@ export const Dashboard: React.FC = () => {
               </div>
               <div>
                 <div className="kpi-label">Total Spending</div>
-                <div className="kpi-value negative">{fmtNPR(summary?.total_spending)}</div>
+                <div className="kpi-value negative"><AnimatedNumber value={summary?.total_spending} format={fmtNPR} /></div>
               </div>
             </button>
 
@@ -446,7 +447,7 @@ export const Dashboard: React.FC = () => {
               </div>
               <div>
                 <div className="kpi-label">Internal Transfers</div>
-                <div className="kpi-value" style={{ color: '#8b5cf6' }}>{fmtNPR(summary?.internal_transfers)}</div>
+                <div className="kpi-value" style={{ color: '#8b5cf6' }}><AnimatedNumber value={summary?.internal_transfers} format={fmtNPR} /></div>
               </div>
             </button>
 
@@ -457,7 +458,7 @@ export const Dashboard: React.FC = () => {
               <div>
                 <div className="kpi-label">Net Cash Flow</div>
                 <div className="kpi-value" style={{ color: parseFloat(summary?.net_cash_flow ?? 0) >= 0 ? '#10b981' : '#ef4444' }}>
-                  {fmtNPR(summary?.net_cash_flow)}
+                  <AnimatedNumber value={summary?.net_cash_flow} format={fmtNPR} />
                 </div>
               </div>
             </button>
