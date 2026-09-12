@@ -7,10 +7,13 @@ Fingerprint components differ by source to ensure:
 """
 
 import hashlib
+import uuid
+from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
 
 from app.parsers.base import ParsedTransaction
+from app.models.transaction import Transaction
 
 
 def compute_transaction_hash(
@@ -104,3 +107,36 @@ def _compute_gmail_hash(txn: ParsedTransaction, account_id: str) -> str:
         str(txn.balance_after or ""), " ".join(txn.description_raw.split()),
     ]
     return hashlib.sha256("|".join(components).encode("utf-8")).hexdigest()
+
+
+def find_cross_source_match(db, txn: ParsedTransaction, account_id: str):
+    """Find an existing non-Gmail transaction representing the same bank event.
+
+    Descriptions are deliberately not required: Nabil PDF and alert remarks
+    commonly describe the same event differently. Exact date matches win;
+    the one-day fallback is used only when amount and post-transaction balance
+    are also identical.
+    """
+    signed_amount = txn.amount
+    normalized_account_id = uuid.UUID(account_id) if isinstance(account_id, str) else account_id
+    base_query = db.query(Transaction).filter(
+        Transaction.account_id == normalized_account_id,
+        Transaction.source != "GMAIL_TRANSACTION_ALERT",
+        Transaction.amount == signed_amount,
+        Transaction.balance_after == txn.balance_after,
+    )
+    exact = base_query.filter(Transaction.transaction_date == txn.transaction_date).all()
+    if len(exact) == 1:
+        return exact[0], "same_account_date_amount_balance", "strong"
+    if len(exact) > 1:
+        return None, "ambiguous_same_date_amount_balance", "ambiguous"
+
+    nearby = base_query.filter(
+        Transaction.transaction_date >= txn.transaction_date - timedelta(days=1),
+        Transaction.transaction_date <= txn.transaction_date + timedelta(days=1),
+    ).all()
+    if len(nearby) == 1:
+        return nearby[0], "same_account_amount_balance_within_one_day", "cautious"
+    if len(nearby) > 1:
+        return None, "ambiguous_nearby_amount_balance", "ambiguous"
+    return None, None, None

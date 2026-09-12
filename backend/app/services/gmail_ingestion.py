@@ -19,7 +19,7 @@ from app.models.statement_import import ImportStatus, ReconciliationStatus, Stat
 from app.models.transaction import Transaction
 from app.parsers.base import ParsedTransaction
 from app.parsers.nabil_email import NabilEmailParser
-from app.services.deduplication import compute_transaction_hash
+from app.services.deduplication import compute_transaction_hash, find_cross_source_match
 from app.services.gmail_client import gmail_service
 from googleapiclient.errors import HttpError
 
@@ -148,6 +148,25 @@ def _masked_account_for_log(value: str | None) -> str:
     return f"{normalized[:3]}{'*' * max(len(normalized) - 6, 1)}{normalized[-3:]}"
 
 
+def reset_gmail_transactions(db: Session, connection: GmailConnection) -> dict:
+    """Remove Gmail-owned rows and processing records, preserving the OAuth connection."""
+    gmail_message_query = db.query(GmailMessage).filter(GmailMessage.connection_id == connection.id)
+    message_records_reset = gmail_message_query.count()
+    gmail_message_query.delete(synchronize_session=False)
+    transactions_deleted = db.query(Transaction).filter(
+        Transaction.source == StatementSource.GMAIL_TRANSACTION_ALERT,
+    ).delete(synchronize_session=False)
+    db.commit()
+    logger.info(
+        "Reset Gmail data for connection %s: transactions_deleted=%d message_records_reset=%d",
+        connection.id, transactions_deleted, message_records_reset,
+    )
+    return {
+        "gmail_transactions_deleted": transactions_deleted,
+        "gmail_message_records_reset": message_records_reset,
+    }
+
+
 def _normalize_account_number(value: str | None) -> str:
     """Remove display formatting while retaining generic account mask characters."""
     return re.sub(r"[^0-9#*xX]", "", value or "").lower().replace("x", "#")
@@ -205,7 +224,7 @@ def sync_nabil_alerts(
     logger.info("Gmail search found %d messages", len(listed))
     result = {
         "emails_found": len(listed), "emails_already_processed": 0, "emails_fetched": 0, "emails_parsed": 0,
-        "transactions_imported": 0, "transaction_duplicates": 0, "failed": 0,
+        "transactions_imported": 0, "matched_existing_transactions": 0, "transaction_duplicates": 0, "failed": 0,
         "quota_deferred": 1 if list_quota_deferred else 0,
         "failure_reasons": [], "bodies_read": 0, "parsed": 0,
         "imported": 0, "duplicates": 0, "new_transactions": 0,
@@ -220,7 +239,7 @@ def sync_nabil_alerts(
             GmailMessage.connection_id == connection.id,
             GmailMessage.gmail_message_id == message_id,
         ).first()
-        if existing_message and existing_message.status in {"IMPORTED", "DUPLICATE"}:
+        if existing_message and existing_message.status in {"IMPORTED", "DUPLICATE", "MATCHED_EXISTING_TRANSACTION"}:
             result["emails_already_processed"] += 1
             logger.info("Gmail message %s already processed with status=%s", message_id, existing_message.status)
             continue
@@ -308,16 +327,25 @@ def sync_nabil_alerts(
                 result["duplicates_skipped"] += 1
                 logger.info("Skipped duplicate Gmail transaction")
             else:
-                txn = Transaction(source=StatementSource.GMAIL_TRANSACTION_ALERT, account_id=account.id, statement_import_id=stmt.id, transaction_date=parsed.transaction_date, transaction_timestamp=parsed.transaction_timestamp, description_raw=parsed.description_raw, amount=parsed.amount, debit_amount=parsed.debit_amount, credit_amount=parsed.credit_amount, currency=account.currency, balance_after=parsed.balance_after, source_reference=message_id, transaction_hash=txn_hash, raw_payload=parsed.raw_payload)
-                db.add(txn)
-                db.flush()
-                record.transaction_id = txn.id
-                record.status = "IMPORTED"
-                result["new_transactions"] += 1
-                result["imported"] += 1
-                result["transactions_imported"] += 1
-                stmt.rows_inserted = (stmt.rows_inserted or 0) + 1
-                logger.info("Imported transaction from Gmail message")
+                matched, match_reason, match_confidence = find_cross_source_match(db, parsed, account.id)
+                if matched:
+                    record.transaction_id = matched.id
+                    record.status = "MATCHED_EXISTING_TRANSACTION"
+                    result["matched_existing_transactions"] += 1
+                    logger.info("Matched Gmail message %s to existing transaction %s (%s)", message_id, matched.id, match_reason)
+                elif match_confidence == "ambiguous":
+                    raise ValueError(f"Ambiguous cross-source transaction match: {match_reason}")
+                else:
+                    txn = Transaction(source=StatementSource.GMAIL_TRANSACTION_ALERT, account_id=account.id, statement_import_id=stmt.id, transaction_date=parsed.transaction_date, transaction_timestamp=parsed.transaction_timestamp, description_raw=parsed.description_raw, amount=parsed.amount, debit_amount=parsed.debit_amount, credit_amount=parsed.credit_amount, currency=account.currency, balance_after=parsed.balance_after, source_reference=message_id, transaction_hash=txn_hash, raw_payload=parsed.raw_payload)
+                    db.add(txn)
+                    db.flush()
+                    record.transaction_id = txn.id
+                    record.status = "IMPORTED"
+                    result["new_transactions"] += 1
+                    result["imported"] += 1
+                    result["transactions_imported"] += 1
+                    stmt.rows_inserted = (stmt.rows_inserted or 0) + 1
+                    logger.info("Imported transaction from Gmail message")
             db.flush()
         except Exception as exc:
             record.status = "FAILED"

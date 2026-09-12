@@ -103,6 +103,23 @@ export const Imports: React.FC = () => {
     finally { setGmailBusy(false); }
   };
 
+  const resetAndResyncGmail = async () => {
+    const confirmed = window.confirm(
+      'Reset Gmail transactions? This removes only transactions created from Gmail alerts and Gmail processing records. Statement, manual, account, and budget data will remain untouched. Your Gmail connection will be preserved.',
+    );
+    if (!confirmed) return;
+    setGmailBusy(true); setGmailError(null); setGmailResult(null);
+    try {
+      const response = await authFetch(`${API}/api/gmail/reset-and-resync`, { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Could not reset and resync Gmail');
+      setGmailResult(data); loadGmailStatus();
+      const importsResponse = await authFetch(`${API}/api/imports/`);
+      if (importsResponse.ok) setImports(await importsResponse.json());
+    } catch (err: any) { setGmailError(err.message); }
+    finally { setGmailBusy(false); }
+  };
+
   const disconnectGmail = async () => {
     setGmailBusy(true); setGmailError(null);
     try {
@@ -138,6 +155,7 @@ export const Imports: React.FC = () => {
             ) : (
               <>
                 <button className="btn" onClick={syncGmail} disabled={gmailBusy}><RefreshCw size={16} /> {gmailBusy ? 'Syncing...' : 'Sync Gmail Transactions'}</button>
+                <button className="btn btn-secondary" onClick={resetAndResyncGmail} disabled={gmailBusy}><RefreshCw size={16} /> Reset &amp; Re-sync Gmail</button>
                 <button className="btn btn-secondary" onClick={disconnectGmail} disabled={gmailBusy}><Unplug size={16} /> Disconnect</button>
               </>
             )}
@@ -145,9 +163,12 @@ export const Imports: React.FC = () => {
         </div>
         {gmailError && <div className="import-error" style={{ marginTop: '0.8rem' }}><AlertTriangle size={14} /> {gmailError}</div>}
         {gmailResult && <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginTop: '1rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+          {gmailResult.gmail_transactions_deleted !== undefined && <span>Gmail transactions reset: <strong>{gmailResult.gmail_transactions_deleted}</strong></span>}
+          {gmailResult.gmail_message_records_reset !== undefined && <span>Processing records reset: <strong>{gmailResult.gmail_message_records_reset}</strong></span>}
           <span>Emails found: <strong>{gmailResult.emails_found}</strong></span>
-          <span>New transactions: <strong>{gmailResult.new_transactions}</strong></span>
-          <span>Duplicates skipped: <strong>{gmailResult.duplicates_skipped}</strong></span>
+          <span>Imported: <strong>{gmailResult.transactions_imported ?? gmailResult.new_transactions}</strong></span>
+          <span>Matched existing: <strong>{gmailResult.matched_existing_transactions ?? 0}</strong></span>
+          <span>Duplicates: <strong>{gmailResult.transaction_duplicates ?? gmailResult.duplicates_skipped}</strong></span>
           <span>Failed: <strong style={{ color: gmailResult.failed ? 'var(--error)' : 'var(--success)' }}>{gmailResult.failed}</strong></span>
         </div>}
         {gmailResult?.failures?.length > 0 && <div className="import-error" style={{ marginTop: '0.8rem' }}>

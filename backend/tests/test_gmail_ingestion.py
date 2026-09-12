@@ -10,7 +10,10 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from app.database import Base
 from app.models.account import Account, AccountType
 from app.models.gmail import GmailConnection, GmailMessage
+from app.models.statement_import import StatementImport, StatementSource, ImportStatus, ReconciliationStatus
 from app.models.transaction import Transaction, TransactionKind
+from app.parsers.base import ParsedTransaction
+from app.services.deduplication import find_cross_source_match
 from app.services import gmail_ingestion
 
 
@@ -108,6 +111,143 @@ def _account_db(*account_numbers):
         db.add(Account(name=f"Nabil {index}", institution="NABIL", account_type=AccountType.BANK, account_number=account_number))
     db.commit()
     return db
+
+
+def _statement_transaction(db, account, *, amount, balance, transaction_date, description):
+    statement = StatementImport(
+        account_id=account.id, source=StatementSource.NABIL, filename="nabil.pdf", file_hash=f"hash-{description}",
+        status=ImportStatus.IMPORTED, reconciliation_status=ReconciliationStatus.NOT_AVAILABLE,
+    )
+    db.add(statement)
+    db.flush()
+    transaction = Transaction(
+        account_id=account.id, statement_import_id=statement.id, source=StatementSource.NABIL,
+        transaction_date=transaction_date, description_raw=description, amount=Decimal(amount),
+        debit_amount=abs(Decimal(amount)) if Decimal(amount) < 0 else None,
+        credit_amount=Decimal(amount) if Decimal(amount) > 0 else None,
+        currency="NPR", balance_after=Decimal(balance), transaction_hash=f"pdf-{description}",
+    )
+    db.add(transaction)
+    db.commit()
+    return transaction
+
+
+def _gmail_candidate(*, amount, balance, transaction_date, description="alert"):
+    signed_amount = Decimal(amount)
+    return ParsedTransaction(
+        source="GMAIL_TRANSACTION_ALERT", transaction_date=transaction_date,
+        transaction_timestamp=datetime.combine(transaction_date, datetime.min.time(), tzinfo=timezone.utc),
+        description_raw=description, amount=signed_amount,
+        debit_amount=abs(signed_amount) if signed_amount < 0 else None,
+        credit_amount=signed_amount if signed_amount > 0 else None,
+        balance_after=Decimal(balance), source_reference="gmail-message", source_row_number=None,
+    )
+
+
+def test_cross_source_debit_and_credit_match_with_different_descriptions():
+    db = _account_db("3410017508963")
+    account = db.query(Account).one()
+    debit = _statement_transaction(db, account, amount="-10924.03", balance="193340.96", transaction_date=datetime(2026, 9, 5).date(), description="POS PUR/99994945/BBSM-BHAKT")
+    matched, reason, confidence = find_cross_source_match(db, _gmail_candidate(amount="-10924.03", balance="193340.96", transaction_date=debit.transaction_date, description="FON:DIFFERENT ALERT TEXT"), str(account.id))
+    assert matched.id == debit.id
+    assert reason == "same_account_date_amount_balance"
+    assert confidence == "strong"
+
+    credit = _statement_transaction(db, account, amount="10924.00", balance="204264.96", transaction_date=datetime(2026, 9, 6).date(), description="PDF deposit description")
+    matched, _, _ = find_cross_source_match(db, _gmail_candidate(amount="10924.00", balance="204264.96", transaction_date=credit.transaction_date, description="FON:IBFT:ALERT"), str(account.id))
+    assert matched.id == credit.id
+
+
+def test_cross_source_match_requires_balance_and_account_and_tolerates_one_day():
+    db = _account_db("3410017508963", "32382575201")
+    accounts = db.query(Account).order_by(Account.account_number).all()
+    transaction = _statement_transaction(db, accounts[0], amount="-600.00", balance="9400.00", transaction_date=datetime(2026, 9, 5).date(), description="PDF transaction")
+    different_balance, _, _ = find_cross_source_match(db, _gmail_candidate(amount="-600.00", balance="9300.00", transaction_date=transaction.transaction_date), str(accounts[0].id))
+    assert different_balance is None
+    different_account, _, _ = find_cross_source_match(db, _gmail_candidate(amount="-600.00", balance="9400.00", transaction_date=transaction.transaction_date), str(accounts[1].id))
+    assert different_account is None
+    nearby, reason, confidence = find_cross_source_match(db, _gmail_candidate(amount="-600.00", balance="9400.00", transaction_date=datetime(2026, 9, 6).date()), str(accounts[0].id))
+    assert nearby.id == transaction.id
+    assert reason == "same_account_amount_balance_within_one_day"
+    assert confidence == "cautious"
+
+
+def test_same_day_same_amount_different_balances_remain_distinct():
+    db = _account_db("3410017508963")
+    account = db.query(Account).one()
+    _statement_transaction(db, account, amount="-100.00", balance="900.00", transaction_date=datetime(2026, 9, 5).date(), description="first")
+    second = _statement_transaction(db, account, amount="-100.00", balance="800.00", transaction_date=datetime(2026, 9, 5).date(), description="second")
+    matched, reason, _ = find_cross_source_match(db, _gmail_candidate(amount="-100.00", balance="700.00", transaction_date=datetime(2026, 9, 5).date()), str(account.id))
+    assert matched is None
+    assert reason is None
+
+
+def test_gmail_message_matching_pdf_transaction_is_linked_without_insert(monkeypatch):
+    db = _account_db("3410017508963")
+    account = db.query(Account).one()
+    pdf_transaction = _statement_transaction(
+        db, account, amount="-600.00", balance="9400.00",
+        transaction_date=datetime(2026, 9, 5).date(), description="POS PUR/99994945/BBSM-BHAKT",
+    )
+    connection = GmailConnection(user_id="user-cross-source", email="user@example.com", encrypted_refresh_token="refresh")
+    db.add(connection)
+    db.commit()
+    messages = {
+        "gmail-match": _message(
+            "gmail-match",
+            "Transaction Date: 2026-09-05 12:37\nTransaction Type: Debit\nTransaction Amount: 600.00\nAvailable Balance: 9,400.00\nRemarks: ALERT DIFFERENT DESCRIPTION",
+        ),
+    }
+    monkeypatch.setattr(gmail_ingestion, "gmail_service", lambda _: _Service(messages))
+
+    result = gmail_ingestion.sync_nabil_alerts(db, connection)
+    second_result = gmail_ingestion.sync_nabil_alerts(db, connection)
+
+    assert result["matched_existing_transactions"] == 1
+    assert result["transactions_imported"] == 0
+    assert second_result["emails_already_processed"] == 1
+    assert second_result["transaction_duplicates"] == 0
+    assert db.query(Transaction).count() == 1
+    record = db.query(GmailMessage).one()
+    assert record.status == "MATCHED_EXISTING_TRANSACTION"
+    assert record.transaction_id == pdf_transaction.id
+
+
+def test_reset_gmail_transactions_preserves_statement_manual_and_connection():
+    db = _account_db("3410017508963")
+    account = db.query(Account).one()
+    statement_transaction = _statement_transaction(
+        db, account, amount="-600.00", balance="9400.00",
+        transaction_date=datetime(2026, 9, 5).date(), description="PDF statement row",
+    )
+    manual_transaction = Transaction(
+        account_id=account.id, source=StatementSource.MANUAL, transaction_date=datetime(2026, 9, 5).date(),
+        description_raw="Manual row", amount=Decimal("-20.00"), currency="NPR", transaction_hash="manual-reset-test",
+    )
+    gmail_transaction = Transaction(
+        account_id=account.id, source=StatementSource.GMAIL_TRANSACTION_ALERT, transaction_date=datetime(2026, 9, 5).date(),
+        description_raw="Gmail row", amount=Decimal("-600.00"), currency="NPR", balance_after=Decimal("9400.00"), transaction_hash="gmail-reset-test",
+    )
+    connection = GmailConnection(user_id="user-reset", email="user@example.com", encrypted_refresh_token="refresh")
+    db.add_all([manual_transaction, gmail_transaction, connection])
+    db.commit()
+    gmail_transaction_id = gmail_transaction.id
+    statement_transaction_id = statement_transaction.id
+    manual_transaction_id = manual_transaction.id
+    db.add_all([
+        GmailMessage(connection_id=connection.id, gmail_message_id="gmail-owned", sender="txn-alert@nabilbank.com", status="IMPORTED", transaction_id=gmail_transaction.id),
+        GmailMessage(connection_id=connection.id, gmail_message_id="matched-pdf", sender="txn-alert@nabilbank.com", status="MATCHED_EXISTING_TRANSACTION", transaction_id=statement_transaction.id),
+    ])
+    db.commit()
+
+    summary = gmail_ingestion.reset_gmail_transactions(db, connection)
+
+    assert summary == {"gmail_transactions_deleted": 1, "gmail_message_records_reset": 2}
+    assert db.query(Transaction).filter(Transaction.id == gmail_transaction_id).count() == 0
+    assert db.query(Transaction).filter(Transaction.id == statement_transaction_id).count() == 1
+    assert db.query(Transaction).filter(Transaction.id == manual_transaction_id).count() == 1
+    assert db.query(GmailMessage).count() == 0
+    assert db.query(GmailConnection).filter(GmailConnection.id == connection.id).count() == 1
 
 
 def test_masked_nabil_account_matches_full_account():

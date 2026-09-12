@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.gmail import GmailConnection, GmailMessage
 from app.services.gmail_client import build_authorization_url, credential_values, exchange_code
-from app.services.gmail_ingestion import sync_nabil_alerts
+from app.services.gmail_ingestion import reset_gmail_transactions, sync_nabil_alerts
 from app.services.gmail_security import create_oauth_state, validate_oauth_state
 
 router = APIRouter()
@@ -106,6 +106,22 @@ def gmail_sync(
         db.rollback()
         logger.warning("Gmail sync failed for user %s: %s", user_id, type(exc).__name__)
         raise HTTPException(status_code=502, detail=f"Gmail sync failed: {exc}")
+
+
+@router.post("/reset-and-resync")
+def gmail_reset_and_resync(user: dict | None = Depends(verify_jwt), db: Session = Depends(get_db)):
+    user_id = _user_id(user)
+    connection = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
+    if not connection:
+        raise HTTPException(status_code=409, detail="Gmail is not connected")
+    try:
+        reset_summary = reset_gmail_transactions(db, connection)
+        sync_summary = sync_nabil_alerts(db, connection)
+        return {**reset_summary, **sync_summary}
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Gmail reset and resync failed for user %s: %s", user_id, type(exc).__name__)
+        raise HTTPException(status_code=502, detail=f"Gmail reset and resync failed: {exc}")
 
 
 @router.delete("/disconnect")

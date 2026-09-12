@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { TrendingUp, TrendingDown, DollarSign, ArrowLeftRight, AlertCircle, Filter } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, ArrowLeftRight, AlertCircle, Filter, Check, X } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import { Link } from 'react-router-dom';
 import { API } from '../config';
@@ -45,6 +45,10 @@ export const Dashboard: React.FC = () => {
   const [unknownCount, setUnknownCount] = useState(0);
   const [dbCategories, setDbCategories] = useState<string[]>([]);
   const [budget, setBudget] = useState<any>(null);
+  const [comparison, setComparison] = useState<any>(null);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [categoryDraft, setCategoryDraft] = useState('');
+  const [savingCategory, setSavingCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
@@ -74,10 +78,16 @@ export const Dashboard: React.FC = () => {
     try {
       const qs = params.toString();
       const q = qs ? `?${qs}` : '';
+      const balanceParams = new URLSearchParams(params);
+      if (!balanceParams.has('date_to') && dateTo) balanceParams.set('date_to', dateTo);
+      const now = new Date();
+      const budgetParams = new URLSearchParams(params);
+      budgetParams.set('year', String(now.getFullYear()));
+      budgetParams.set('month', String(now.getMonth() + 1));
 
       const [
         summaryRes, spendCatRes, incCatRes, spendAccRes, 
-        trendRes, unkRes, accsRes, balanceAccsRes, recentRes, catsRes
+        trendRes, unkRes, accsRes, balanceAccsRes, recentRes, catsRes, comparisonRes, budgetRes
       ] = await Promise.all([
         authFetch(`${API}/api/analytics/summary${q}`),
         authFetch(`${API}/api/analytics/categories${q}`),
@@ -86,9 +96,11 @@ export const Dashboard: React.FC = () => {
         authFetch(`${API}/api/analytics/monthly-trend${q}`),
         authFetch(`${API}/api/analytics/unknown-count${q}`),
         authFetch(`${API}/api/analytics/accounts`),
-        authFetch(`${API}/api/analytics/accounts?${new URLSearchParams({ ...(accountId ? { account_id: accountId } : {}), ...(source ? { source } : {}), ...(dateTo ? { date_to: dateTo } : {}) }).toString()}`),
+        authFetch(`${API}/api/analytics/accounts?${balanceParams.toString()}`),
         authFetch(`${API}/api/transactions/${q}${qs ? '&' : '?'}page=1&page_size=10`),
-        authFetch(`${API}/api/analytics/distinct-categories`)
+        authFetch(`${API}/api/analytics/distinct-categories`),
+        authFetch(`${API}/api/analytics/comparison${q}`),
+        authFetch(`${API}/api/analytics/budget?${budgetParams.toString()}`),
       ]);
 
       if (!summaryRes.ok) throw new Error(`Summary: ${summaryRes.status}`);
@@ -100,14 +112,13 @@ export const Dashboard: React.FC = () => {
       setSpendingByAcc((await spendAccRes.json()).accounts || []);
       setMonthlyTrend((await trendRes.json()).months || []);
       setUnknownCount((await unkRes.json()).count || 0);
-      const now = new Date();
-      const budgetRes = await authFetch(`${API}/api/analytics/budget?year=${now.getFullYear()}&month=${now.getMonth() + 1}`);
       if (generation !== requestGeneration.current) return;
       setAccounts(await accsRes.json());
       setBalanceAccounts(await balanceAccsRes.json());
       setRecent((await recentRes.json()).transactions || []);
       setDbCategories((await catsRes.json()).categories || []);
       setBudget(budgetRes.ok ? await budgetRes.json() : null);
+      setComparison(comparisonRes.ok ? await comparisonRes.json() : null);
       
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard');
@@ -115,6 +126,25 @@ export const Dashboard: React.FC = () => {
       setLoading(false);
     }
   }, [accountId, source, dateFrom, dateTo, kindFilter, categoryFilter]);
+
+  const updateCategory = async (transactionId: string) => {
+    setSavingCategory(transactionId);
+    try {
+      const response = await authFetch(`${API}/api/transactions/${transactionId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: categoryDraft }),
+      });
+      if (!response.ok) throw new Error((await response.json()).detail || 'Could not update category');
+      const updated = await response.json();
+      setRecent(current => current.map(txn => txn.id === transactionId ? { ...txn, category: updated.category } : txn));
+      setEditingCategory(null);
+      await fetchAll();
+    } catch (err: any) {
+      setError(err.message || 'Could not update category');
+    } finally {
+      setSavingCategory(null);
+    }
+  };
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -319,6 +349,31 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
 
+          <div className="dashboard-analysis-grid">
+            <div className="card money-flow-card">
+              <div className="section-kicker">MONEY FLOW</div>
+              <h3>Income to savings</h3>
+              <div className="money-flow-path">
+                <div><span>Income</span><strong className="positive">{fmtNPR(summary?.total_income)}</strong></div>
+                <span className="flow-arrow">→</span>
+                <div><span>Expenses</span><strong className="negative">{fmtNPR(summary?.total_spending)}</strong></div>
+                <span className="flow-arrow">→</span>
+                <div><span>Net / savings</span><strong className={parseFloat(summary?.net_cash_flow ?? 0) >= 0 ? 'positive' : 'negative'}>{fmtNPR(summary?.net_cash_flow)}</strong></div>
+              </div>
+            </div>
+            {comparison?.available && (
+              <div className="card comparison-card">
+                <div className="section-kicker">PERIOD COMPARISON</div>
+                <h3>{comparison.current_period.from} to {comparison.current_period.to}</h3>
+                <div className="comparison-stats">
+                  <span>Expenses <strong className={parseFloat(comparison.current.total_spending) - parseFloat(comparison.previous.total_spending) > 0 ? 'negative' : 'positive'}>{fmtNPR(parseFloat(comparison.current.total_spending) - parseFloat(comparison.previous.total_spending))}</strong></span>
+                  <span>Income <strong className={parseFloat(comparison.current.total_income) - parseFloat(comparison.previous.total_income) >= 0 ? 'positive' : 'negative'}>{fmtNPR(parseFloat(comparison.current.total_income) - parseFloat(comparison.previous.total_income))}</strong></span>
+                  <span>Net flow <strong>{fmtNPR(parseFloat(comparison.current.net_cash_flow) - parseFloat(comparison.previous.net_cash_flow))}</strong></span>
+                </div>
+              </div>
+            )}
+          </div>
+
           {budget && (
             <div className="card">
               <div className="page-header"><div><h3>Monthly Plan</h3><p className="page-subtitle">Consumption excludes investments and internal transfers.</p></div><Link to="/budget" className="btn-ghost">View Plan</Link></div>
@@ -356,11 +411,11 @@ export const Dashboard: React.FC = () => {
           <div className="two-col" style={{ opacity: loading ? 0.5 : 1 }}>
             
             {/* Spending Category pie */}
-            <div className="card">
+            <div className="card category-analysis-card">
               <h3>Spending by Category</h3>
               {spendingCats.length > 0 ? (
                 <>
-                  <div style={{ height: 240, marginTop: '1rem' }}>
+                  <div className="category-chart">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie data={spendingCats} cx="50%" cy="50%" innerRadius={55} outerRadius={95}
@@ -388,6 +443,19 @@ export const Dashboard: React.FC = () => {
                       </div>
                     ))}
                   </div>
+                  {comparison?.category_changes?.length > 0 && (
+                    <div className="category-comparison-list">
+                      <div className="section-kicker">VS PREVIOUS PERIOD</div>
+                      {comparison.category_changes.slice(0, 5).map((item: any) => (
+                        <div key={item.category} className="category-change-row">
+                          <span>{item.category}</span>
+                          <strong className={parseFloat(item.difference) > 0 ? 'negative' : 'positive'}>
+                            {parseFloat(item.difference) > 0 ? '+' : ''}{fmtNPR(item.difference)}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
@@ -452,6 +520,8 @@ export const Dashboard: React.FC = () => {
                   ) : recent.map(t => {
                     const amount = parseFloat(t.amount);
                     const kind = t.transaction_kind || 'UNKNOWN';
+                    const account = accounts.find(item => item.account_id === t.account_id);
+                    const isEditing = editingCategory === t.id;
                     return (
                       <div key={t.id} className="recent-txn-row">
                         <div style={{
@@ -460,7 +530,23 @@ export const Dashboard: React.FC = () => {
                         }} />
                         <div className="rtxn-desc">
                           <div className="rtxn-main">{t.description_raw}</div>
-                          <div className="rtxn-date">{t.transaction_date} · <span style={{ color: KIND_COLORS[kind] }}>{KIND_LABELS[kind]}</span>{t.category ? ` · ${t.category}` : ''}</div>
+                          <div className="rtxn-date">{t.transaction_date} · {account?.account_name || 'Account'} · <span style={{ color: KIND_COLORS[kind] }}>{KIND_LABELS[kind]}</span></div>
+                          <div className="dashboard-category-editor">
+                            {isEditing ? (
+                              <>
+                                <select value={categoryDraft} onChange={e => setCategoryDraft(e.target.value)} className="inline-category-select">
+                                  <option value="">Uncategorized</option>
+                                  {dbCategories.map(category => <option key={category} value={category}>{category}</option>)}
+                                </select>
+                                <button className="icon-btn success" title="Save category" disabled={savingCategory === t.id} onClick={() => updateCategory(t.id)}><Check size={14} /></button>
+                                <button className="icon-btn" title="Cancel" onClick={() => setEditingCategory(null)}><X size={14} /></button>
+                              </>
+                            ) : (
+                              <button className="category-edit-trigger" onClick={() => { setEditingCategory(t.id); setCategoryDraft(t.category || ''); }}>
+                                {t.category || 'Uncategorized'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className={`rtxn-amount ${amount >= 0 ? 'positive' : 'negative'}`}>
                           {amount >= 0 ? '+' : ''}{fmt(amount)}

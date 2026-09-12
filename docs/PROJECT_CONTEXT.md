@@ -78,6 +78,29 @@ returns a `next_page_token`. Gmail 403 quota errors and 429 rate limits use
 exponential backoff; exhausted quota stops the current batch and reports
 `quota_deferred` without marking the sync successful.
 
+The dashboard uses one shared filter context for summary, category and account
+spending, monthly trend, account balances, budget actuals, comparisons, and the
+filtered transaction list. Period comparisons are calculated server-side for
+the selected date window versus the immediately preceding equivalent window.
+Dashboard category edits use the existing transaction classification update API
+and refresh analytics without a full page reload.
+
+NABIL PDF and Gmail alert imports use a cross-source duplicate matcher before
+Gmail insertion. It requires the same account, signed Decimal amount, and
+post-transaction balance, preferring the same calendar date and allowing a
+single-day fallback. Descriptions are supporting context only. A matched Gmail
+message is linked to the existing transaction with status
+`MATCHED_EXISTING_TRANSACTION`; it is not inserted as a second canonical row.
+
+The authenticated Gmail reset-and-resync operation deletes only transactions
+whose source is `GMAIL_TRANSACTION_ALERT` and clears that connection's
+`gmail_messages` records. It preserves accounts, budgets, statement/manual
+transactions, matched statement transactions, and the encrypted Gmail OAuth
+connection, then starts a fresh sync using the cross-source matcher.
+
+The standard editable category options include `Lunch`, `Home Expense`, and `Petrol / Gas`.
+They are exposed alongside categories already used by stored transactions.
+
 Gmail conversation threads are not ingestion units. The sync uses
 `users.messages.list` and fetches each returned `message.id` independently with
 `messages.get(format="full")`. Multiple messages sharing one Gmail `threadId`

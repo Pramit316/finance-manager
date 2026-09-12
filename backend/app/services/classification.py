@@ -33,9 +33,12 @@ logger = logging.getLogger(__name__)
 # Default categories
 CATEGORIES = [
     "Food & Dining",
+    "Lunch",
+    "Home Expense",
     "Groceries",
     "Shopping",
     "Transport",
+    "Petrol / Gas",
     "Bills & Utilities",
     "Entertainment",
     "Health",

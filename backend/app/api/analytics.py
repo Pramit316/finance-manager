@@ -221,10 +221,32 @@ def get_account_balances(
 
 
 @router.get("/budget")
-def get_budget_comparison(year: int = Query(..., ge=2000, le=2100), month: int = Query(..., ge=1, le=12), db: Session = Depends(get_db)):
-    result = analytics.get_budget_comparison(db, year, month)
+def get_budget_comparison(
+    year: int = Query(..., ge=2000, le=2100), month: int = Query(..., ge=1, le=12),
+    date_from: Optional[date] = Query(None), date_to: Optional[date] = Query(None),
+    account_id: Optional[uuid.UUID] = Query(None), source: Optional[str] = Query(None),
+    transaction_kind: Optional[str] = Query(None), category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    result = analytics.get_budget_comparison(
+        db, year, month, date_from=date_from, date_to=date_to, account_id=account_id, source=source,
+        transaction_kind=transaction_kind, category=category,
+    )
     if result is None:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Budget not found")
     return result
+
+
+@router.get("/comparison")
+def get_period_comparison(
+    date_from: Optional[date] = Query(None), date_to: Optional[date] = Query(None),
+    account_id: Optional[uuid.UUID] = Query(None), source: Optional[str] = Query(None),
+    transaction_kind: Optional[str] = Query(None), category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return analytics.get_period_comparison(
+        db, date_from=date_from, date_to=date_to, account_id=account_id,
+        source=source, transaction_kind=transaction_kind, category=category,
+    )
 

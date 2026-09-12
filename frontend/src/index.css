@@ -588,6 +588,27 @@ select option { background: var(--bg-secondary); }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
 @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+.dashboard-analysis-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 1.5rem; }
+.section-kicker { color: var(--text-secondary); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 0.35rem; }
+.money-flow-path { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 1rem; }
+.money-flow-path div { display: flex; flex-direction: column; gap: 0.15rem; }
+.money-flow-path span { color: var(--text-secondary); font-size: 0.78rem; }
+.money-flow-path strong { font-size: 1.05rem; }
+.flow-arrow { color: var(--accent-primary) !important; font-size: 1.25rem !important; }
+.comparison-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-top: 1rem; }
+.comparison-stats span { color: var(--text-secondary); font-size: 0.78rem; }
+.comparison-stats strong { display: block; margin-top: 0.2rem; font-size: 0.95rem; }
+.category-chart { height: 190px; margin-top: 0.65rem; }
+.category-analysis-card { min-height: 0; }
+.category-comparison-list { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.category-change-row { display: flex; justify-content: space-between; padding: 0.32rem 0; font-size: 0.8rem; }
+.dashboard-category-editor { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.15rem; }
+.category-edit-trigger { border: 0; padding: 0; background: transparent; color: var(--accent-primary); font: inherit; font-size: 0.75rem; cursor: pointer; }
+.category-edit-trigger:hover { text-decoration: underline; }
+.inline-category-select { width: auto; min-width: 130px; padding: 0.25rem 0.4rem; font-size: 0.75rem; }
+.dashboard-category-editor .icon-btn { width: 24px; height: 24px; }
+@media (max-width: 900px) { .dashboard-analysis-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .money-flow-path { align-items: flex-start; flex-direction: column; } .flow-arrow { transform: rotate(90deg); } .comparison-stats { grid-template-columns: 1fr; } }
 
 .recent-txns-list { display: flex; flex-direction: column; }
 .recent-txn-row {

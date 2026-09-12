@@ -11,7 +11,7 @@ internal_transfers metric.
 
 import logging
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -432,17 +432,19 @@ def get_unknown_transaction_count(db: Session, **filters) -> int:
 
 
 def get_distinct_categories(db: Session) -> list[str]:
-    """Return all categories actually used in stored transactions."""
+    """Return used categories plus the standard categories available for editing."""
+    from app.services.classification import CATEGORIES
+
     rows = (
         db.query(distinct(Transaction.category))
         .filter(Transaction.category.isnot(None))
         .order_by(Transaction.category)
         .all()
     )
-    return [r[0] for r in rows]
+    return sorted(set(CATEGORIES) | {r[0] for r in rows})
 
 
-def get_budget_comparison(db: Session, year: int, month: int) -> dict:
+def get_budget_comparison(db: Session, year: int, month: int, **filters) -> dict:
     """Return deterministic planned-vs-actual figures for one calendar month."""
     budget = db.query(MonthlyBudget).filter(
         MonthlyBudget.year == year, MonthlyBudget.month == month
@@ -451,9 +453,13 @@ def get_budget_comparison(db: Session, year: int, month: int) -> dict:
         return None
 
     from calendar import monthrange
-    date_from = date(year, month, 1)
-    date_to = date(year, month, monthrange(year, month)[1])
-    transactions = _base_filtered_query(db, date_from=date_from, date_to=date_to).all()
+    month_from = date(year, month, 1)
+    month_to = date(year, month, monthrange(year, month)[1])
+    selected_from = filters.pop("date_from", None)
+    selected_to = filters.pop("date_to", None)
+    date_from = max(month_from, selected_from) if selected_from else month_from
+    date_to = min(month_to, selected_to) if selected_to else month_to
+    transactions = _base_filtered_query(db, date_from=date_from, date_to=date_to, **filters).all() if date_from <= date_to else []
     genuine_income = sum(
         (t.amount for t in transactions
          if t.transaction_kind == TransactionKind.INCOME
@@ -534,4 +540,42 @@ def get_budget_comparison(db: Session, year: int, month: int) -> dict:
         "saving_variance": actual_saving - planned_saving,
         "internal_transfers": internal_transfers,
         "allocations": comparisons,
+    }
+
+
+def get_period_comparison(db: Session, *, date_from: date | None, date_to: date | None, **filters) -> dict:
+    """Compare the selected date window with the immediately preceding equivalent window."""
+    if not date_from or not date_to or date_to < date_from:
+        return {"available": False, "current": None, "previous": None, "category_changes": []}
+
+    days = (date_to - date_from).days + 1
+    previous_to = date_from - timedelta(days=1)
+    previous_from = previous_to - timedelta(days=days - 1)
+    current_filters = {**filters, "date_from": date_from, "date_to": date_to}
+    previous_filters = {**filters, "date_from": previous_from, "date_to": previous_to}
+    current = get_analytics_summary(db, **current_filters)
+    previous = get_analytics_summary(db, **previous_filters)
+    current_categories, _ = get_category_totals(db, **current_filters)
+    previous_categories, _ = get_category_totals(db, **previous_filters)
+    previous_by_category = {item["category"]: item["amount"] for item in previous_categories}
+    category_changes = []
+    for item in current_categories:
+        previous_amount = previous_by_category.pop(item["category"], Decimal("0"))
+        category_changes.append({
+            "category": item["category"],
+            "current": item["amount"],
+            "previous": previous_amount,
+            "difference": item["amount"] - previous_amount,
+        })
+    category_changes.extend({
+        "category": category, "current": Decimal("0"), "previous": amount, "difference": -amount,
+    } for category, amount in previous_by_category.items())
+    category_changes.sort(key=lambda item: abs(item["difference"]), reverse=True)
+    return {
+        "available": True,
+        "current_period": {"from": date_from, "to": date_to},
+        "previous_period": {"from": previous_from, "to": previous_to},
+        "current": current,
+        "previous": previous,
+        "category_changes": category_changes,
     }
