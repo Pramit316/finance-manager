@@ -3,6 +3,7 @@ import { Search, Filter, ChevronLeft, ChevronRight, Edit2, Check, X, Plus } from
 import NepaliDate from 'nepali-date-converter';
 import { API } from '../config';
 import { authFetch } from '../lib/api';
+import { currentBsMonthRange, pastBsMonthRange } from '../lib/dateUtils';
 
 const KIND_COLORS: Record<string, string> = {
   EXPENSE: '#ef4444',
@@ -155,21 +156,13 @@ export const Transactions: React.FC = () => {
         setDateFrom(start.toLocaleDateString('en-CA'));
         setDateTo(end.toLocaleDateString('en-CA'));
       } else if (p === 'BS_THIS_MONTH') {
-        const nd = new NepaliDate();
-        const start = new NepaliDate(nd.getYear(), nd.getMonth(), 1);
-        const end = new NepaliDate(nd.getYear(), nd.getMonth(), start.getDaysInMonth());
-        setDateFrom(start.toJsDate().toLocaleDateString('en-CA'));
-        setDateTo(end.toJsDate().toLocaleDateString('en-CA'));
+        const range = currentBsMonthRange(now);
+        setDateFrom(range.from);
+        setDateTo(range.to);
       } else if (p === 'BS_LAST_MONTH') {
-        const nd = new NepaliDate();
-        const m = nd.getMonth();
-        const y = nd.getYear();
-        const pastM = m === 0 ? 11 : m - 1;
-        const pastY = m === 0 ? y - 1 : y;
-        const start = new NepaliDate(pastY, pastM, 1);
-        const end = new NepaliDate(pastY, pastM, start.getDaysInMonth());
-        setDateFrom(start.toJsDate().toLocaleDateString('en-CA'));
-        setDateTo(end.toJsDate().toLocaleDateString('en-CA'));
+        const range = pastBsMonthRange(now);
+        setDateFrom(range.from);
+        setDateTo(range.to);
       }
     } catch (err) {
         console.error(err);
