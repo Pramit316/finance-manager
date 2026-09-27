@@ -67,3 +67,17 @@ export function currentBsMonthRange(today = new Date()): { from: string; to: str
   last.setDate(last.getDate() - 1);
   return { from: formatIsoDate(first), to: formatIsoDate(last) };
 }
+
+export function pastBsMonthRange(today = new Date()): { from: string; to: string } {
+  const current = new NepaliDate(today).getBS();
+  const pastMonth = current.month === 0 ? 11 : current.month - 1;
+  const pastYear = current.month === 0 ? current.year - 1 : current.year;
+  
+  const first = new NepaliDate(pastYear, pastMonth, 1).toJsDate();
+  const nextMonth = pastMonth === 11
+    ? new NepaliDate(pastYear + 1, 0, 1).toJsDate()
+    : new NepaliDate(pastYear, pastMonth + 1, 1).toJsDate();
+  const last = new Date(nextMonth);
+  last.setDate(last.getDate() - 1);
+  return { from: formatIsoDate(first), to: formatIsoDate(last) };
+}

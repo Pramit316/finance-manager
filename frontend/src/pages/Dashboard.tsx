@@ -5,7 +5,7 @@ import { Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, X
 import { Link } from 'react-router-dom';
 import { API } from '../config';
 import { authFetch } from '../lib/api';
-import { bsInputValue, bsToAd, currentBsMonthRange, formatDualDate } from '../lib/dateUtils';
+import { bsInputValue, bsToAd, currentBsMonthRange, pastBsMonthRange, formatDualDate } from '../lib/dateUtils';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 
 const COLORS = ['#4f8ef7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#6b7280'];
@@ -238,6 +238,10 @@ export const Dashboard: React.FC = () => {
       const range = currentBsMonthRange(today);
       setDateFrom(range.from);
       setDateTo(range.to);
+    } else if (preset === 'bslastmonth') {
+      const range = pastBsMonthRange(today);
+      setDateFrom(range.from);
+      setDateTo(range.to);
     } else if (preset === 'lastmonth') {
         const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
         const last = new Date(today.getFullYear(), today.getMonth(), 0);
@@ -251,7 +255,7 @@ export const Dashboard: React.FC = () => {
   };
 
   const datePresets = [
-    ['all', 'All Time'], ['today', 'Today'], ['7days', 'Last 7 Days'], ['30days', 'Last 30 Days'], ['bsmonth', 'This Nepali Month'],
+    ['all', 'All Time'], ['today', 'Today'], ['7days', 'Last 7 Days'], ['30days', 'Last 30 Days'], ['bsmonth', 'This Nepali Month'], ['bslastmonth', 'Past Nepali Month'],
     ['month', 'This Month'], ['lastmonth', 'Last Month'], ['year', 'This Year'], ['custom', 'Custom Range'],
   ];
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Search, Filter, ChevronLeft, ChevronRight, Edit2, Check, X, Plus } from 'lucide-react';
+import NepaliDate from 'nepali-date-converter';
 import { API } from '../config';
 import { authFetch } from '../lib/api';
 
@@ -84,6 +85,12 @@ export const Transactions: React.FC = () => {
   const [maxAmount, setMaxAmount] = useState('');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  
+  // Date system
+  const [dateSystem, setDateSystem] = useState<'AD' | 'BS'>('AD');
+  const [bsFrom, setBsFrom] = useState('');
+  const [bsTo, setBsTo] = useState('');
+  const [preset, setPreset] = useState('');
 
   // Edit state
   const [editing, setEditing] = useState<EditState | null>(null);
@@ -91,6 +98,84 @@ export const Transactions: React.FC = () => {
   const [showManualForm, setShowManualForm] = useState(false);
   const [manual, setManual] = useState({ account_id: '', transaction_date: new Date().toISOString().slice(0, 10), description: '', amount: '', direction: 'EXPENSE', category: '', subcategory: '', merchant: '', payment_method: 'CASH', notes: '' });
   const [manualError, setManualError] = useState('');
+
+  const handleBsChange = (val: string, isFrom: boolean) => {
+    if (isFrom) setBsFrom(val); else setBsTo(val);
+    try {
+      const parts = val.split('-');
+      if (parts.length === 3 && parts[0].length === 4 && parts[1].length === 2 && parts[2].length === 2) {
+        const nd = new NepaliDate(val);
+        // Add 5:45 offset logic if needed, but simple toJsDate works since we split T
+        const iso = nd.toJsDate().toLocaleDateString('en-CA'); // 'en-CA' is YYYY-MM-DD
+        if (isFrom) setDateFrom(iso); else setDateTo(iso);
+      } else if (val === '') {
+        if (isFrom) setDateFrom(''); else setDateTo('');
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (!dateFrom) {
+      if (bsFrom) setBsFrom('');
+    } else {
+      try {
+        const d = new Date(dateFrom);
+        const nd = new NepaliDate(d);
+        const bsStr = nd.format('YYYY-MM-DD');
+        if (bsStr !== bsFrom) setBsFrom(bsStr);
+      } catch {}
+    }
+  }, [dateFrom]);
+
+  useEffect(() => {
+    if (!dateTo) {
+      if (bsTo) setBsTo('');
+    } else {
+      try {
+        const d = new Date(dateTo);
+        const nd = new NepaliDate(d);
+        const bsStr = nd.format('YYYY-MM-DD');
+        if (bsStr !== bsTo) setBsTo(bsStr);
+      } catch {}
+    }
+  }, [dateTo]);
+
+  const applyPreset = (p: string) => {
+    if (!p) return;
+    const now = new Date();
+    try {
+      if (p === 'AD_THIS_MONTH') {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        setDateFrom(start.toLocaleDateString('en-CA'));
+        setDateTo(end.toLocaleDateString('en-CA'));
+      } else if (p === 'AD_LAST_MONTH') {
+        const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const end = new Date(now.getFullYear(), now.getMonth(), 0);
+        setDateFrom(start.toLocaleDateString('en-CA'));
+        setDateTo(end.toLocaleDateString('en-CA'));
+      } else if (p === 'BS_THIS_MONTH') {
+        const nd = new NepaliDate();
+        const start = new NepaliDate(nd.getYear(), nd.getMonth(), 1);
+        const end = new NepaliDate(nd.getYear(), nd.getMonth(), start.getDaysInMonth());
+        setDateFrom(start.toJsDate().toLocaleDateString('en-CA'));
+        setDateTo(end.toJsDate().toLocaleDateString('en-CA'));
+      } else if (p === 'BS_LAST_MONTH') {
+        const nd = new NepaliDate();
+        const m = nd.getMonth();
+        const y = nd.getYear();
+        const pastM = m === 0 ? 11 : m - 1;
+        const pastY = m === 0 ? y - 1 : y;
+        const start = new NepaliDate(pastY, pastM, 1);
+        const end = new NepaliDate(pastY, pastM, start.getDaysInMonth());
+        setDateFrom(start.toJsDate().toLocaleDateString('en-CA'));
+        setDateTo(end.toJsDate().toLocaleDateString('en-CA'));
+      }
+    } catch (err) {
+        console.error(err);
+    }
+    setPreset('');
+  };
 
   const PAGE_SIZE = 50;
 
@@ -266,26 +351,66 @@ export const Transactions: React.FC = () => {
             style={{ width: 100 }}
           />
 
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={e => setDateFrom(e.target.value)}
-            className="filter-select"
-            title="From date"
-          />
-          <input
-            type="date"
-            value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
-            className="filter-select"
-            title="To date"
-          />
+          <select value={preset} onChange={e => { setPreset(e.target.value); applyPreset(e.target.value); }} className="filter-select">
+            <option value="">Custom Date Range</option>
+            <option value="AD_THIS_MONTH">This Month (AD)</option>
+            <option value="AD_LAST_MONTH">Last Month (AD)</option>
+            <option value="BS_THIS_MONTH">This Month (BS)</option>
+            <option value="BS_LAST_MONTH">Past Nepali Month</option>
+          </select>
+
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <select value={dateSystem} onChange={e => setDateSystem(e.target.value as 'AD' | 'BS')} className="filter-select" style={{ width: 60, paddingLeft: 4, paddingRight: 4 }}>
+              <option value="AD">AD</option>
+              <option value="BS">BS</option>
+            </select>
+            
+            {dateSystem === 'AD' ? (
+              <>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => setDateFrom(e.target.value)}
+                  className="filter-select"
+                  title="From date"
+                />
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => setDateTo(e.target.value)}
+                  className="filter-select"
+                  title="To date"
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder="YYYY-MM-DD"
+                  value={bsFrom}
+                  onChange={e => handleBsChange(e.target.value, true)}
+                  className="filter-select"
+                  title="From date (BS)"
+                  style={{ width: 110 }}
+                />
+                <input
+                  type="text"
+                  placeholder="YYYY-MM-DD"
+                  value={bsTo}
+                  onChange={e => handleBsChange(e.target.value, false)}
+                  className="filter-select"
+                  title="To date (BS)"
+                  style={{ width: 110 }}
+                />
+              </>
+            )}
+          </div>
 
           {(accountId || sourceFilter || kindFilter || categoryFilter || dateFrom || dateTo || search || minAmount || maxAmount) && (
             <button className="btn-ghost" onClick={() => {
               setAccountId(''); setSourceFilter(''); setKindFilter(''); setCategoryFilter('');
               setDateFrom(''); setDateTo(''); setSearch(''); setSearchInput('');
-              setMinAmount(''); setMaxAmount('');
+              setMinAmount(''); setMaxAmount(''); setBsFrom(''); setBsTo(''); setPreset('');
             }}>
               Clear
             </button>
